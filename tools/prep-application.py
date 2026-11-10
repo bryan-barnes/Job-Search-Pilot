@@ -42,7 +42,10 @@ import linkedin_check  # noqa: E402
 HOME = jobsfile.HOME
 TOOLS = HOME / "tools"
 FIELDS = ["company", "role", "pay", "location", "remote", "url", "source", "fit", "blocker", "notes"]
-CHROME_DEFAULT = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+if sys.platform == "win32":
+    CHROME_DEFAULT = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+else:
+    CHROME_DEFAULT = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 
 def load_cfg() -> dict:

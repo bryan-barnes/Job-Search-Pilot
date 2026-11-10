@@ -37,6 +37,24 @@ def runner_name(cfg: dict) -> str:
     return cfg.get("agent", {}).get("runner", "manual")
 
 
+def worker_token(cfg: dict) -> str:
+    """The job-alerts Worker's read key. On macOS, from the Keychain (service
+    job-alerts-worker); on any platform, from config.json's worker_token (gitignored, so it's
+    safe on Windows, which has no Keychain equivalent here)."""
+    tok = str(cfg.get("worker_token", "") or "").strip()
+    if tok and "YOUR-" not in tok.upper():
+        return tok
+    if sys.platform == "darwin":
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "job-alerts-worker", "-w"],
+            capture_output=True, text=True,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    sys.exit("No Worker key. On a Mac, add it to the Keychain (service job-alerts-worker); "
+             "on Windows, set worker_token in config.json. See docs/linkedin-alerts.md.")
+
+
 def executable(cfg: dict) -> str | None:
     runner = runner_name(cfg)
     if runner == "opencode":

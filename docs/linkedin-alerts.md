@@ -20,6 +20,27 @@ The ingest script is safe to run any time: it's a no-op when there's no new mail
 `--dry-run` changes nothing. The board runs it for you every 3 hours between 8am and 10pm
 (output in `ingest.log`); "Check for new jobs" runs it on demand.
 
+## Why it's built this way (LinkedIn's policy)
+
+LinkedIn's terms prohibit automated access to the site, and enforcement has locked out and
+banned accounts that scrape it, especially through a logged-in session. Your account is worth
+more than any single job alert, so this pipeline is designed to **never log in to LinkedIn**:
+
+- **The alerts come from LinkedIn's own email feature.** You set up the alert as a human user,
+  and LinkedIn emails it to your inbox. Reading your own mailbox is not scraping.
+- **The Worker stores the emails in your own Cloudflare account.** Nothing about your LinkedIn
+  account touches it; it just holds mail for 30 days.
+- **The scripts only read public job pages** — the same HTML a logged-out browser gets, a few
+  pages per alert batch, about one page per second. They never send a login, never use your
+  cookies, and never click anything.
+- **When a script can't read a page, it gives up quietly.** The job stays in the board with
+  `remote: unknown` and a note. The design goal is to degrade gracefully, never to fight a
+  login wall.
+
+The only signed-in LinkedIn in the whole workflow is the manual, human-paced part: you
+reading the workplace badge and you clicking Apply, in your own browser. That's normal use of
+the site, not automation.
+
 ## 1. The LinkedIn alert
 
 In LinkedIn, save a job alert with your search (title, location "Remote", etc.). It emails

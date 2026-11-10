@@ -18,7 +18,11 @@ Each run also re-checks LinkedIn jobs you haven't applied to yet (new, found, ap
 any whose posting has closed as "expired", which removes them from the board.
 
 The email text is untrusted. It is only parsed into fields and passed to the agent as data.
-The Worker access key is read from the macOS Keychain (service "job-alerts-worker").
+The Worker access key is read from the macOS Keychain (service "job-alerts-worker") or from
+config.json's worker_token (the Windows way).
+
+This pipeline never logs in to LinkedIn: it reads your alert emails and public job pages only.
+See docs/linkedin-alerts.md for why.
 """
 from __future__ import annotations
 
@@ -48,17 +52,6 @@ CACHE = HOME / "alerts-scores.json"
 
 def log(msg: str) -> None:
     print(msg, flush=True)
-
-
-def keychain_token() -> str:
-    out = subprocess.run(
-        ["security", "find-generic-password", "-s", "job-alerts-worker", "-w"],
-        capture_output=True, text=True,
-    )
-    if out.returncode != 0:
-        sys.exit("No Worker key in Keychain (service job-alerts-worker). "
-                 "Add it and set worker_url in config.json (see docs/linkedin-alerts.md).")
-    return out.stdout.strip()
 
 
 def worker_get(base: str, path: str, token: str, params: dict | None = None) -> bytes:
@@ -260,7 +253,7 @@ def main() -> None:
     worker = cfg.get("worker_url", "")
     if not worker or "YOUR-" in worker.upper():
         sys.exit("config.json: set worker_url to your job-alerts Worker (see docs/linkedin-alerts.md).")
-    token = keychain_token()
+    token = agent.worker_token(cfg)
     master = HOME / cfg.get("resume_master", "resume/master.md")
     if not master.is_file():
         sys.exit(f"No master resume at {master} (config.json: resume_master).")

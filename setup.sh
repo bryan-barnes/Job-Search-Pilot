@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "== job-search setup =="
+echo "== Job Search Pilot setup =="
 for tool in python3 node pdfinfo; do
   if command -v "$tool" >/dev/null 2>&1; then echo "ok:      $tool"
   else echo "MISSING: $tool (needed; pdfinfo comes from poppler: brew install poppler)"; fi

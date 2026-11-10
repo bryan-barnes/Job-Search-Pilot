@@ -24,6 +24,7 @@ so new alert emails reach the board without anyone clicking.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -268,7 +269,10 @@ class Handler(BaseHTTPRequestHandler):
             if not PACKET_RE.match(name) or not (target / name).is_file():
                 return self._json(404, {"error": f"{name} isn't in the packet"})
             target = target / name
-        subprocess.run(["open", str(target)], check=False)
+        if sys.platform == "win32":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        else:
+            subprocess.run(["open", str(target)], check=False)
         self._json(200, {"ok": True})
 
 

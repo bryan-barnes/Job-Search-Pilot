@@ -119,6 +119,12 @@ decide; agents never fill them in.
 
 ## LinkedIn alerts pipeline
 
+**Why this design:** LinkedIn's terms prohibit automated access, and accounts get locked out for
+scraping, especially through a logged-in session. So this pipeline never logs in to LinkedIn: it
+uses LinkedIn's own alert emails (read from your mailbox, stored in your own Cloudflare account)
+and only reads public job pages, a few per run. The only signed-in LinkedIn is the manual,
+human-paced part: you reading the badge and you clicking Apply. See `docs/linkedin-alerts.md`.
+
 LinkedIn alert emails reach your inbox, and an email filter forwards them to an alerts address you
 own (e.g. `alerts@yourdomain.com`). A Cloudflare Email Worker called `job-alerts` (code in
 `tools/job-alerts-worker/`) stores only LinkedIn mail, for 30 days. `tools/ingest-alerts.py` pulls

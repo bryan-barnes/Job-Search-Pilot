@@ -1,6 +1,6 @@
-# Job Search Cockpit
+# Job Search Pilot
 
-A private, local cockpit for a job search: a job board, an automatic LinkedIn alert pipeline,
+A private, local pilot for a job search: a job board, an automatic LinkedIn alert pipeline,
 and a per-job application workflow where an AI agent writes your resume variants, cover letters,
 and form answers from your approved materials. You review everything; nothing is ever submitted
 without you.
@@ -14,10 +14,14 @@ the tools and templates, with no personal data (see `AGENTS.md` for the rule).
 - **The board** (`tracker.html` + `tools/board-server.py`): a local web page listing your jobs
   in a pipeline (New → Found → Applying → Applied → ...). Its buttons save straight to
   `jobs.js`. Fully remote jobs only; the rest are hidden.
+- **The setup wizard** (`tools/setup-wizard.py`): walks a new Mac or Windows through the
+  whole setup in plain language - tools, config, your files, a resume build test, the board,
+  and the optional LinkedIn alerts.
 - **The alert pipeline** (`tools/ingest-alerts.py` + a Cloudflare Email Worker): LinkedIn
   alert emails are forwarded to an address you own, stored for 30 days, and pulled into the
   board as `new` jobs. Closed postings and (optionally) contract/temp/part-time jobs are
-  skipped; each job's remote status is read from the posting.
+  skipped; each job's remote status is read from the posting. It never logs in to LinkedIn,
+  on purpose, so your account is never at risk (see `docs/linkedin-alerts.md`).
 - **Application packets** (`tools/prep-application.py`): for each job you want, a folder in
   `applications/<job-id>/` with the saved posting, a one-page resume variant, a cover letter,
   draft form answers, an honest fit check, and a prompt for Claude in Chrome to fill the
@@ -25,11 +29,21 @@ the tools and templates, with no personal data (see `AGENTS.md` for the rule).
 - **The agent** (`tools/agent.py`): the writing is done by the CLI you configure, `opencode`
   or `claude`, or by you pasting a prompt file into any assistant (`manual` mode).
 
-## Quick start (on a Mac)
+## Quick start
 
-1. `zsh setup.sh` — checks for `python3`, `node`, `pdfinfo` (poppler), and Google Chrome,
-   installs the one Node dependency, and creates `config.json` from the example.
-2. Fill in the templates (the setup script lists them):
+**Run the setup wizard — it walks you through every step:**
+
+```
+python3 tools/setup-wizard.py        (Mac and Windows)
+```
+
+or double-click `Open Job Board.command` (Mac) / `Open Job Board.bat` (Windows) once the
+wizard is done. The wizard checks your tools, installs the one Node dependency, creates
+`config.json`, stores your Worker key, and walks you through the files you need to fill in,
+with separate instructions for Mac and Windows. On a Mac you can also run `zsh setup.sh`
+for a quick non-interactive check.
+
+Then fill in the templates (the wizard lists them):
    - `resume/master.md` — your one-page resume. The format the builders expect is in
      `resume/README.md`. The PDF/Word files are named after its first line.
    - `AGENTS.md` — who you are, what you're targeting, your rules for agents. This is the file
@@ -95,13 +109,15 @@ The full field list and the rules agents follow are in `AGENTS.md`.
 | `config.example.json` | The configuration template |
 | `tools/` | The scripts (see below) |
 | `applications/<job-id>/` | One folder per applied job (gitignored) |
-| `docs/linkedin-alerts.md` | Setting up the alert pipeline, and how the emails get parsed |
+| `docs/linkedin-alerts.md` | Setting up the alert pipeline, how the emails get parsed, and why it never logs in to LinkedIn |
 | `docs/agents.md` | The three agent runners and how to install them |
+| `docs/windows.md` | Windows setup and the differences from Mac |
 
 ## The tools
 
 | Script | Job |
 |---|---|
+| `tools/setup-wizard.py` | The setup wizard: walks a new Mac or Windows through every step |
 | `tools/board-server.py` | Serves the board on 127.0.0.1:8765 and saves its buttons to `jobs.js` |
 | `tools/jobsfile.py` | Safe, atomic edits to `jobs.js` (used by the other scripts) |
 | `tools/ingest-alerts.py` | Pulls new alert emails, checks the postings, adds jobs to `jobs.js` |

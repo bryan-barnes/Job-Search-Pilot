@@ -1,5 +1,6 @@
 {
   "worker_url": "https://YOUR-WORKER.workers.dev",
+  "worker_token": null,
   "resume_master": "resume/master.md",
   "agent": {
     "runner": "manual",
