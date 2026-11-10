@@ -1,0 +1,13 @@
+{
+  "worker_url": "https://YOUR-WORKER.workers.dev",
+  "resume_master": "resume/master.md",
+  "agent": {
+    "runner": "manual",
+    "model": null
+  },
+  "scoring": {
+    "enabled": false
+  },
+  "permanent_only": true,
+  "chrome_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+}

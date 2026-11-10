@@ -1,0 +1,14 @@
+# Personal data and local state: never commit these
+config.json
+applications/
+strengths/
+alerts-state.json
+alerts-scores.json
+ingest.log
+.jobs.lock
+resume/*.pdf
+resume/*.docx
+tools/node_modules/
+__pycache__/
+*.pyc
+.DS_Store

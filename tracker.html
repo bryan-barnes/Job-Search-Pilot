@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Search Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one working column. Pipeline strip on top, ranked job rows below, editor in a dialog. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #15202a;
+  --muted: #5a6774;
+  --line: #d9e0e6;
+  --accent: #c24100;        /* warm orange accent, darkened for text contrast */
+  --accent-soft: #fde9df;
+  --good: #1f7a4d; --good-soft: #e1f3e9;
+  --warn: #9a6200; --warn-soft: #fbf0d9;
+  --bad: #a3303a; --bad-soft: #f8e3e5;
+  --idle: #5a6774; --idle-soft: #e9edf1;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1317; --surface: #161e25; --ink: #e6ebef; --muted: #93a0ac; --line: #26313a;
+  --accent: #ff7a3d; --accent-soft: #3a2014;
+  --good: #5cc98f; --good-soft: #15301f; --warn: #e3b25a; --warn-soft: #33270f;
+  --bad: #f08a93; --bad-soft: #3a1a1e; --idle: #93a0ac; --idle-soft: #222b33;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1317; --surface: #161e25; --ink: #e6ebef; --muted: #93a0ac; --line: #26313a;
+  --accent: #ff7a3d; --accent-soft: #3a2014;
+  --good: #5cc98f; --good-soft: #15301f; --warn: #e3b25a; --warn-soft: #33270f;
+  --bad: #f08a93; --bad-soft: #3a1a1e; --idle: #93a0ac; --idle-soft: #222b33;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 22px; }
+header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px 24px; }
+.fetch { display: grid; justify-items: end; gap: 6px; text-align: right; }
+.fetch-line { color: var(--muted); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.fetch-line.bad { color: var(--bad); }
+@media (max-width: 620px) {
+  header { grid-template-columns: minmax(0, 1fr); } .fetch { justify-items: start; text-align: left; }
+  .pipeline { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stage { padding: 8px 9px; } .stage span { font-size: 0.64rem; letter-spacing: 0.03em; }
+  .ended { justify-content: flex-start; }
+}
+.stages { display: grid; gap: 8px; }
+.ended { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ended button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px; padding: 3px 11px; font-size: 0.8rem; }
+.ended button b { color: var(--ink); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.ended button:hover { border-color: var(--muted); }
+.ended button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+h1 { font: 800 1.9rem/1.1 var(--display); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; }
+button { font: inherit; cursor: pointer; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 600; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn.danger { color: var(--bad); }
+.btn:focus-visible, .row:focus-visible, .stage:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .pick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+.stage { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 10px 12px; text-align: left; color: var(--ink); }
+.stage b { display: block; font: 800 1.5rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.stage span { display: block; margin-top: 4px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+
+.tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; color: var(--muted); font-size: 0.85rem; }
+.tools label { display: inline-flex; gap: 6px; align-items: center; }
+select, input, textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+
+.list { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; text-align: left; color: var(--ink); width: 100%; }
+.row:hover { border-color: var(--muted); }
+.score { font: 800 1.6rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.score small { font: 500 0.7rem var(--mono); color: var(--muted); display: block; margin-top: 4px; letter-spacing: 0.02em; }
+.who { min-width: 0; }
+.who h2 { font: 600 1rem/1.3 var(--body); margin: 0; }
+.who .co { color: var(--muted); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 0.82rem; color: var(--muted); }
+.meta .pay { font-family: var(--mono); font-size: 0.78rem; color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 220px; }
+.chip { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 999px; white-space: nowrap; background: var(--idle-soft); color: var(--idle); }
+.chip.good { background: var(--good-soft); color: var(--good); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.hot { background: var(--accent-soft); color: var(--accent); }
+.empty { border: 1px dashed var(--line); border-radius: 10px; padding: 28px; text-align: center; color: var(--muted); }
+.note { color: var(--muted); font-size: 0.85rem; max-width: 70ch; }
+.note code { font-family: var(--mono); font-size: 0.8rem; }
+
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); padding: 0; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); }
+dialog::backdrop { background: rgb(10 15 20 / 0.45); }
+.ed { display: grid; gap: 14px; padding: 20px; }
+.ed h3 { font: 800 1.25rem var(--display); margin: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.field { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); }
+.field input, .field select, .field textarea { width: 100%; }
+textarea { min-height: 84px; resize: vertical; }
+.scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.pick { display: flex; gap: 4px; }
+.pick button { flex: 1; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 6px 0; font: 600 0.9rem var(--mono); }
+.pick button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.hint { font-size: 0.75rem; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+.actions div { display: flex; gap: 8px; flex-wrap: wrap; }
+.confirm { color: var(--bad); font-size: 0.85rem; }
+.status { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+
+@media (max-width: 620px) {
+  .row { grid-template-columns: 52px minmax(0, 1fr); }
+  .chips { grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="head-main">
+      <h1>Job Search Board</h1>
+      <p class="sub">Ranked by fit, company, and how much you'd like the job. Each score is 1 to 5, for 15 points total.</p>
+    </div>
+    <div class="fetch">
+      <button type="button" class="btn" id="ingestBtn" hidden>Check for new jobs</button>
+      <span class="fetch-line" id="ingestLine"></span>
+      <span class="fetch-line" id="updated" hidden></span>
+    </div>
+  </header>
+
+  <div class="stages">
+    <nav class="pipeline" id="pipeline" aria-label="Filter by stage"></nav>
+    <nav class="ended" id="ended" aria-label="Jobs that ended"></nav>
+  </div>
+
+  <div class="tools">
+    <span class="tools-left"><span id="countLine">Loading jobs…</span> <button type="button" class="linkbtn" id="hiddenBtn" hidden></button>
+      <button type="button" class="btn small" id="checkBtn" hidden></button>
+      <button type="button" class="btn small" id="prepBtn" hidden></button></span>
+    <label for="sortSel">Sort
+      <select id="sortSel">
+        <option value="score">Highest score</option>
+        <option value="next">Next step date</option>
+        <option value="added">Recently added</option>
+      </select>
+    </label>
+  </div>
+
+  <p class="note" id="checkIntro" hidden>Open each posting and look at the badge under the job title: <strong>Remote</strong>, <strong>Hybrid</strong>, or <strong>On-site</strong>. That badge has been reliable. (It only shows when you're signed in to LinkedIn, so the automatic check can't see it.) Then come back and mark it. The job you just opened is highlighted when you return.</p>
+
+  <div class="prepbar" id="prepBar" hidden>
+    <p id="prepIntro"></p>
+    <div><button type="button" class="btn" id="prepCancel">Cancel</button><button type="button" class="btn primary" id="prepGo"></button></div>
+  </div>
+
+  <section class="list" id="list" aria-live="polite">
+    <div class="empty">Loading your jobs…</div>
+  </section>
+
+  <p class="note">Only fully remote jobs are listed. Jobs whose posting expired before you applied are removed from the board. Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. Click a job to mark it Interested, Not interested, Posting expired, or Not selected (they declined to move you forward) (open the board with <code>Open Job Board.command</code> so the buttons can save). For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
+</div>
+
+<dialog id="dlg" aria-labelledby="dTitle">
+  <div class="ed">
+    <h3 id="dTitle"></h3>
+    <p class="sub" id="dCo"></p>
+    <dl class="grid2" id="dFields"></dl>
+    <div class="triage" id="dTriage">
+      <label class="field" for="dReason">Reason (optional, saved to notes)
+        <input id="dReason" type="text" maxlength="300" autocomplete="off" placeholder="e.g. too much creative direction">
+      </label>
+      <div class="triage-btns" id="dBtns"></div>
+    </div>
+    <div class="packet" id="dPacket" hidden>
+      <h4>Application packet</h4>
+      <p class="status" id="dPacketLine"></p>
+      <div class="triage-btns" id="dPacketBtns"></div>
+    </div>
+    <p class="hint" id="dReadonly" hidden>To use the buttons, open the board with <strong>Open Job Board.command</strong> in the job-search folder.</p>
+    <div class="actions"><span class="status" id="dStatus" role="status"></span><div><a class="btn" id="dLink" target="_blank" rel="noopener">Open posting</a><button class="btn primary" type="button" id="dClose">Close</button></div></div>
+  </div>
+</dialog>
+<style>
+  dl.grid2 { margin: 0; }
+  dl.grid2 div { display: grid; gap: 2px; }
+  dt { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  dd.wide, div.wide { grid-column: 1 / -1; }
+  a.btn { text-decoration: none; display: inline-block; }
+  .triage { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .triage-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .linkbtn { border: 0; background: none; color: var(--muted); font-weight: 400; padding: 0; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
+  .linkbtn:hover { color: var(--ink); text-decoration-color: currentColor; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+    border-radius: 10px; padding: 10px 14px; display: flex; gap: 14px; align-items: center; font-size: 0.9rem;
+    max-width: calc(100vw - 32px); box-shadow: 0 6px 24px rgb(0 0 0 / 0.25); }
+  .toast button { border: 0; background: none; color: var(--bg); font-weight: 700; text-decoration: underline; padding: 0; }
+  .toast[hidden] { display: none; }
+  .tools-left { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .btn.small { padding: 4px 10px; font-size: 0.82rem; }
+  .btn.small[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .card.done { opacity: .7; }
+  .card { display: grid; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .card .row { border: 0; border-radius: 0; }
+  .card.flash { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .quick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--bg); }
+  .quick-hint { font-size: 0.82rem; color: var(--muted); margin-right: auto; }
+  .packet { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .packet h4 { margin: 0; font: 600 0.95rem var(--body); }
+  .packet .status { margin: 0; }
+  .pick-box { display: grid; place-items: center; padding-left: 14px; }
+  .pick-box input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .card.pickable { grid-template-columns: auto minmax(0, 1fr); }
+  .card.off .row { opacity: .55; }
+  .prepbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; }
+  .prepbar[hidden] { display: none; }
+  .prepbar p { margin: 0; font-size: 0.9rem; max-width: 62ch; }
+  .prepbar div { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+<div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
+<script src="jobs.js"></script>
+<script>
+const MAIN_STAGES = [["new","New leads"],["found","Found"],["applying","Applying"],["applied","Applied"],["screen","Screen"],["interview","Interview"],["offer","Offer"]];
+const ENDED_STAGES = [["rejected","Not selected"],["closed","Closed"],["passed","Passed"]];
+const STAGES = [...MAIN_STAGES, ...ENDED_STAGES];
+const STAGE_LABEL = { ...Object.fromEntries(STAGES), expired: "Expired" };
+const EDITABLE = location.protocol.startsWith("http");
+const ACTIVE = new Set(["new","found","applying","applied","screen","interview","offer"]);
+const NOT_APPLIED = new Set(["new","found","applying"]);
+const jobs = (window.JOBS || []).map((j, i) => ({ id: j.id || String(i), ...j }));
+let filter = "active";
+let showHidden = false;
+let packets = {};
+let lastOpened = null;
+const prepPicked = new Set(); // jobs ticked in Prep packets mode
+const checkedNow = new Map(); // jobs marked during this Check remote round stay on screen until "Done checking"
+// The board lists fully remote jobs only. Expired postings (closed before you applied) never show.
+const isRemote = (j) => j.remote === "yes";
+// Anything the auto-check decided (remote, hybrid, or unsure) waits for you to confirm it.
+const needsCheck = (j) => j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked;
+// Ready for a packet: not applied yet, remote confirmed by you, no packet yet.
+const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && j.remote === "yes" && !!j.remoteChecked && !packets[j.id];
+const visible = (j) => j.status !== "expired" && (showHidden || isRemote(j));
+const inStage = (j, k) => k === "active" ? ACTIVE.has(j.status || "found") : (j.status || "found") === k;
+const $ = (id) => document.getElementById(id);
+const today = () => new Date(new Date().toDateString());
+const days = (iso) => iso ? Math.floor((today() - new Date(iso + "T00:00:00")) / 864e5) : null;
+const total = (j) => (j.fit || 0) + (j.co || 0) + (j.like || 0);
+const rated = (j) => [j.fit, j.co, j.like].filter(Boolean).length;
+
+function chipsFor(j) {
+  const c = [], s = j.status || "found";
+  const cls = { offer: "good", interview: "good", screen: "good", applied: "hot", applying: "hot", rejected: "bad", closed: "bad" }[s] || "";
+  c.push([STAGE_LABEL[s] || s, cls]);
+  const pk = packets[j.id];
+  if (pk) c.push(...{ ready: [["Packet ready", "good"]], running: [["Preparing packet…", "hot"]], queued: [["Packet queued", "hot"]], failed: [["Packet failed", "bad"]] }[pk.state] || []);
+  const since = days(j.applied), heard = days(j.lastContact);
+  if (s === "applied" && since !== null && since >= 10 && (heard === null || heard >= 10)) c.push(["Follow up", "warn"]);
+  const nd = days(j.nextDate);
+  if (j.nextDate && nd !== null && nd >= 0 && ACTIVE.has(s)) c.push([nd === 0 ? "Due today" : `Overdue ${nd}d`, "warn"]);
+  if (j.blocker) c.push([j.blocker.length > 28 ? j.blocker.slice(0, 26) + "…" : j.blocker, "bad"]);
+  if (!isRemote(j)) c.push([j.remote === "no" ? (j.remoteChecked ? "Not remote" : "Not remote (auto-check)") : "Remote unconfirmed", "bad"]);
+  else if (needsCheck(j)) c.push(["Check remote", "warn"]);
+  if (rated(j) < 3) c.push(["Needs scores", ""]);
+  return c;
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function btn(label, cls, onclick) { const b = el("button", "btn " + (cls || ""), label); b.type = "button"; b.onclick = onclick; return b; }
+
+function renderPipeline() {
+  const shown = jobs.filter(visible);
+  const count = (k) => shown.filter((j) => inStage(j, k)).length;
+  const go = (k) => () => { filter = k; render(); };
+  $("pipeline").replaceChildren(...[["active", "Active"], ...MAIN_STAGES].map(([k, l]) => {
+    const b = el("button", "stage"); b.type = "button"; b.setAttribute("aria-pressed", String(filter === k));
+    b.append(el("b", null, count(k)), el("span", null, l)); b.title = l;
+    b.onclick = go(k);
+    return b;
+  }));
+  $("ended").replaceChildren(...ENDED_STAGES.map(([k, l]) => {
+    const b = el("button", null, l); b.type = "button"; b.setAttribute("aria-pressed", String(filter === k));
+    b.append(el("b", null, count(k)));
+    b.onclick = go(k);
+    return b;
+  }));
+}
+function rowFor(j) {
+  const r = el("button", "row"); r.type = "button";
+  const sc = el("div", "score", rated(j) ? total(j) : "–");
+  sc.append(el("small", null, `F${j.fit || "·"} C${j.co || "·"} M${j.like || "·"}`));
+  const who = el("div", "who");
+  const meta = el("div", "meta");
+  if (j.pay) meta.append(el("span", "pay", j.pay));
+  if (j.location) meta.append(el("span", null, j.location));
+  if (j.applied) meta.append(el("span", null, `Applied ${days(j.applied)}d ago`));
+  if (j.next) meta.append(el("span", null, "Next: " + j.next + (j.nextDate ? ` (${j.nextDate})` : "")));
+  who.append(el("h2", null, j.role || "Untitled role"), el("div", "co", j.company || ""), meta);
+  const ch = el("div", "chips");
+  chipsFor(j).forEach(([t, c]) => ch.append(el("span", "chip " + c, t)));
+  r.append(sc, who, ch);
+  r.onclick = () => openDetails(j);
+  return r;
+}
+// Check-remote mode: each job gets Open posting / Fully remote / Not remote right on the card.
+function checkCard(j) {
+  const card = el("div", "card"); card.dataset.id = j.id;
+  const quick = el("div", "quick");
+  const done = checkedNow.get(j.id);
+  if (done) {
+    card.classList.add("done");
+    quick.append(el("span", "quick-hint", done === "yes" ? "✓ Marked fully remote. It's on the board." : "Marked not remote. Hidden from the board."));
+    card.append(rowFor(j), quick);
+    return card;
+  }
+  quick.append(el("span", "quick-hint", j.remote === "yes" ? "Auto-check says remote. Confirm it:"
+    : j.remote === "no" ? "Auto-check says hybrid or on-site. Confirm it:" : "The posting didn't say. Check it:"));
+  if (j.url) {
+    const a = el("a", "btn", "Open posting ↗"); a.href = j.url; a.target = "_blank"; a.rel = "noopener";
+    a.onclick = () => { lastOpened = j.id; };
+    quick.append(a);
+  }
+  if (EDITABLE) quick.append(
+    btn("Fully remote", "primary", () => { checkedNow.set(j.id, "yes"); quickSet(j, { remote: "yes" }, "Fully remote"); }),
+    btn("Not remote", "danger", () => { checkedNow.set(j.id, "no"); quickSet(j, { remote: "no" }, "Not remote"); }));
+  card.append(rowFor(j), quick);
+  return card;
+}
+function prepCard(j) {
+  const card = el("div", "card pickable" + (prepPicked.has(j.id) ? "" : " off"));
+  const box = el("label", "pick-box"); const cb = el("input"); cb.type = "checkbox";
+  cb.checked = prepPicked.has(j.id); cb.setAttribute("aria-label", `Prep a packet for ${j.role} at ${j.company}`);
+  cb.onchange = () => { cb.checked ? prepPicked.add(j.id) : prepPicked.delete(j.id); renderList(); };
+  box.append(cb); card.append(box, rowFor(j));
+  return card;
+}
+function renderPrepBar(rows) {
+  const on = filter === "prep";
+  $("prepBar").hidden = !on;
+  if (!on) return;
+  const n = rows.filter((j) => prepPicked.has(j.id)).length;
+  const waiting = jobs.filter((j) => needsCheck(j) && j.remote === "yes").length;
+  $("prepIntro").textContent = `These jobs are confirmed fully remote and have no packet yet. Untick any you'd skip. Packets build three at a time, a few minutes each, and the jobs move to Applying.`
+    + (waiting ? ` ${waiting} more remote job${waiting === 1 ? " still needs" : "s still need"} a remote check first.` : "");
+  $("prepGo").textContent = n ? `Prep ${n} packet${n === 1 ? "" : "s"}` : "Nothing ticked";
+  $("prepGo").disabled = !n;
+}
+function renderList() {
+  const checking = filter === "check", prepping = filter === "prep";
+  const sort = $("sortSel").value;
+  const rows = jobs.filter((j) => checking ? needsCheck(j) || checkedNow.has(j.id) : prepping ? prepReady(j) : visible(j) && inStage(j, filter)).sort((a, b) => {
+    if (sort === "next") return (a.nextDate || "9999").localeCompare(b.nextDate || "9999");
+    if (sort === "added") return (b.added || "").localeCompare(a.added || "");
+    const act = (ACTIVE.has(b.status || "found") ? 1 : 0) - (ACTIVE.has(a.status || "found") ? 1 : 0);
+    return act || total(b) - total(a);
+  });
+  const shown = jobs.filter(visible);
+  const active = shown.filter((j) => ACTIVE.has(j.status || "found")).length;
+  const hidden = jobs.filter((j) => j.status !== "expired" && !isRemote(j)).length;
+  const toCheck = jobs.filter(needsCheck).length;
+  $("countLine").textContent = `${shown.length} remote job${shown.length === 1 ? "" : "s"} · ${active} active`;
+  $("hiddenBtn").hidden = !hidden || checking;
+  $("hiddenBtn").textContent = showHidden ? "Hide jobs that aren't fully remote" : `· ${hidden} not fully remote (show)`;
+  $("checkBtn").hidden = !toCheck && !checking && !checkedNow.size;
+  $("checkBtn").textContent = checking ? "Done checking" : `Check remote (${toCheck})`;
+  $("checkBtn").setAttribute("aria-pressed", String(checking));
+  $("checkIntro").hidden = !checking;
+  const ready = jobs.filter(prepReady).length;
+  $("prepBtn").hidden = !EDITABLE || prepping || checking || !ready;
+  $("prepBtn").textContent = `Prep packets (${ready})`;
+  renderPrepBar(rows);
+  if (!rows.length) {
+    const empty = el("div", "empty", checking ? "All checked. Nice." : prepping ? "No confirmed remote jobs are waiting for a packet." : shown.length ? "No jobs at this stage." : "No jobs yet.");
+    if (checking && ready && EDITABLE) { empty.append(" "); empty.append(btn(`Prep packets for the ${ready} remote job${ready === 1 ? "" : "s"}`, "primary", startPrepMode)); }
+    $("list").replaceChildren(empty); return;
+  }
+  $("list").replaceChildren(...rows.map((j) => checking ? checkCard(j) : prepping ? prepCard(j) : rowFor(j)));
+}
+function render() { renderPipeline(); renderList(); }
+
+async function post(path, body) {
+  let r;
+  try {
+    r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  } catch {
+    throw new Error("Can't reach the board server. Double-click “Open Job Board.command”, then reload this page and try again.");
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Save failed (${r.status})`);
+  return data;
+}
+let toastTimer;
+function toast(msg, undo = true) {
+  $("toastMsg").textContent = msg; $("toastUndo").hidden = !undo; $("toast").hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 8000);
+}
+function applyResult(j, change, res) {
+  Object.assign(j, change);
+  for (const k of ["notes", "applied", "remoteChecked"]) if (res[k] != null) j[k] = res[k];
+}
+async function quickSet(j, change, label) {
+  try { applyResult(j, change, await post("/api/update", { id: j.id, ...change })); render(); toast(`${label}: ${j.role}`); }
+  catch (e) { toast(e.message, false); }
+}
+async function act(j, label, change) {
+  $("dStatus").textContent = "Saving…";
+  try {
+    applyResult(j, change, await post("/api/update", { id: j.id, ...change, note: $("dReason").value }));
+    $("dlg").close(); render();
+    toast(`${label}: ${j.role}`);
+  } catch (e) { $("dStatus").textContent = e.message; }
+}
+$("toastUndo").onclick = async () => {
+  try { await post("/api/undo"); location.reload(); }
+  catch (e) { $("toastMsg").textContent = e.message; }
+};
+$("hiddenBtn").onclick = () => { showHidden = !showHidden; render(); };
+function startPrepMode() { prepPicked.clear(); jobs.filter(prepReady).forEach((j) => prepPicked.add(j.id)); checkedNow.clear(); filter = "prep"; render(); window.scrollTo({ top: 0 }); }
+$("prepBtn").onclick = startPrepMode;
+$("prepCancel").onclick = () => { filter = "active"; render(); };
+$("prepGo").onclick = async () => {
+  const ids = jobs.filter((j) => prepReady(j) && prepPicked.has(j.id)).map((j) => j.id);
+  if (!ids.length) return;
+  $("prepGo").disabled = true;
+  try {
+    const res = await post("/api/prep-batch", { ids });
+    for (const id of res.queued) {
+      packets[id] = { state: "queued", step: "Waiting in line" };
+      const j = jobs.find((x) => x.id === id); if (j && (j.status === "new" || j.status === "found")) j.status = "applying";
+    }
+    filter = "applying"; render(); poll();
+    toast(`Preparing ${res.queued.length} packet${res.queued.length === 1 ? "" : "s"}, three at a time.` + (res.skipped.length ? ` Skipped ${res.skipped.length}.` : ""), false);
+  } catch (e) { $("prepIntro").textContent = e.message; $("prepGo").disabled = false; }
+};
+$("checkBtn").onclick = () => { filter = filter === "check" ? "active" : "check"; checkedNow.clear(); render(); };
+// Pick up changes made outside this tab (agents, scripts, another window).
+let lastJobsText = null;
+async function refreshJobs() {
+  if (!EDITABLE || $("dlg").open) return;
+  let text;
+  try { text = await (await fetch("/jobs.js", { cache: "no-store" })).text(); } catch { return; }
+  if (lastJobsText === null) { lastJobsText = text; return; }
+  if (text === lastJobsText) return;
+  const w = {};
+  try { new Function("window", text)(w); } catch { return; }
+  lastJobsText = text;
+  jobs.splice(0, jobs.length, ...(w.JOBS || []).map((j, i) => ({ id: j.id || String(i), ...j })));
+  if (w.JOBS_UPDATED) $("updated").textContent = "Last updated " + w.JOBS_UPDATED;
+  render();
+}
+refreshJobs();
+setInterval(refreshJobs, 30000);
+window.addEventListener("focus", refreshJobs);
+// Coming back from a posting tab: point at the job you just opened.
+window.addEventListener("focus", () => {
+  if (filter !== "check" || !lastOpened) return;
+  const card = document.querySelector(`.card[data-id="${CSS.escape(lastOpened)}"]`);
+  if (!card) return;
+  document.querySelectorAll(".card.flash").forEach((c) => c.classList.remove("flash"));
+  card.classList.add("flash"); card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.querySelector(".quick .btn.primary")?.focus({ preventScroll: true });
+});
+
+// Status buttons in the job dialog.
+function actionsFor(j) {
+  const s = j.status || "found", a = [];
+  if (s === "new") a.push(["Interested", { status: "found" }, "primary"]);
+  if (s === "applying") a.push(["Mark applied", { status: "applied" }, "primary"]);
+  if (["applying","applied","screen","interview","offer"].includes(s)) a.push(["Not selected", { status: "rejected" }, "danger"]);
+  if (ACTIVE.has(s)) a.push(["Not interested", { status: "passed" }, "danger"]);
+  if (NOT_APPLIED.has(s)) a.push(["Posting expired", { status: "expired" }, ""]);
+  if (j.remote !== "no") a.push(["Not fully remote", { remote: "no" }, ""]);
+  if (j.remote !== "yes" || !j.remoteChecked) a.push(["Confirmed remote", { remote: "yes" }, ""]);
+  if (s === "passed" || s === "closed") a.push(["Move back to Found", { status: "found" }, ""]);
+  if (s === "rejected") a.push(["Move back to Applied", { status: "applied" }, ""]);
+  return a;
+}
+
+// Application packet panel in the job dialog.
+function renderPacket(j) {
+  const box = $("dPacket"), pk = packets[j.id], s = j.status || "found";
+  box.hidden = !EDITABLE || !(ACTIVE.has(s) || pk);
+  if (box.hidden) return;
+  const line = $("dPacketLine"), btns = $("dPacketBtns");
+  const open = (label, file) => btn(label, "", () => post("/api/open", { id: j.id, file }).catch((e) => line.textContent = e.message));
+  const prep = (label) => btn(label, packets[j.id] ? "" : "primary", async () => {
+    if (label === "Rebuild" && !confirm("Rebuild writes a new resume, cover letter, and answers from scratch, replacing any edits. The current versions are saved in the packet's previous/ folder. Rebuild?")) return;
+    try { await post("/api/prep", { id: j.id }); packets[j.id] = { state: "running", step: "Starting" };
+      if (NOT_APPLIED.has(s) && s !== "applying") j.status = "applying";
+      renderPacket(j); render(); poll(); }
+    catch (e) { line.textContent = e.message; }
+  });
+  btns.replaceChildren();
+  if (!pk) {
+    line.textContent = NOT_APPLIED.has(s) ? "No packet yet. Prep application writes a tailored resume, cover letter, answers, and a Claude in Chrome prompt (a few minutes)." : "No packet for this job.";
+    if (NOT_APPLIED.has(s)) btns.append(prep("Prep application"));
+  } else if (pk.state === "running") {
+    line.textContent = `Preparing: ${pk.step}`;
+  } else if (pk.state === "queued") {
+    line.textContent = "Queued. It starts when one of the packets ahead of it finishes.";
+  } else if (pk.state === "failed") {
+    line.textContent = `Packet failed: ${pk.step}`;
+    btns.append(prep("Try again"), open("Open folder"));
+  } else if (pk.state === "manual") {
+    line.textContent = "Manual mode: read RUN-THIS.md and paste it into your AI assistant. When resume.md, cover-letter.md, and answers.md are in the folder, build the PDFs.";
+    btns.append(
+      open("Read RUN-THIS.md", "RUN-THIS.md"),
+      btn("Build documents", "primary", async () => {
+        try { await post("/api/build", { id: j.id }); packets[j.id] = { state: "running", step: "Building documents" }; renderPacket(j); poll(); }
+        catch (e) { line.textContent = e.message; }
+      }),
+      open("Open folder"));
+  } else {
+    line.textContent = pk.step + ". Read fit-check.md first, then paste the Chrome prompt into Claude in Chrome.";
+    // The PDF buttons come from the packet's actual files (the builders name them after your name).
+    const pdfs = (pk.files || []).filter((f) => f.endsWith(".pdf")).map((f) =>
+      open(f.includes("Resume") ? "Resume PDF" : "Cover letter PDF", f));
+    btns.append(
+      btn("Copy Chrome prompt", "primary", async () => {
+        try { const r = await fetch(`/api/packet/${j.id}/apply-in-chrome.md`); await navigator.clipboard.writeText(await r.text()); line.textContent = "Copied. Paste it into Claude in Chrome."; }
+        catch (e) { line.textContent = "Couldn't copy: " + e.message; }
+      }),
+      open("Fit check", "fit-check.md"),
+      ...pdfs,
+      open("Answers", "answers.md"),
+      open("Open folder"), prep("Rebuild"));
+  }
+}
+let pollTimer, openJob = null;
+async function loadPackets() {
+  if (!EDITABLE) return;
+  try { packets = await (await fetch("/api/packets")).json(); } catch { return; }
+  render(); if (openJob && $("dlg").open) renderPacket(openJob);
+  if (Object.values(packets).some((p) => p.state === "running" || p.state === "queued")) poll();
+}
+function poll() { clearTimeout(pollTimer); pollTimer = setTimeout(loadPackets, 5000); }
+
+const LABELS = [["status","Stage"],["pay","Pay"],["location","Location"],["remote","Fully remote"],["source","Found via"],["fit","Fit (1–5)"],["co","Company (1–5)"],["like","Me (1–5)"],["applied","Applied"],["lastContact","Last reply"],["contact","Contact"],["resume","Resume sent"],["next","Next step"],["nextDate","Next step date"],["blocker","Dealbreaker or risk"],["added","Added"],["notes","Notes"]];
+function openDetails(j) {
+  openJob = j;
+  $("dReason").value = ""; $("dStatus").textContent = "";
+  $("dTriage").hidden = !EDITABLE; $("dReadonly").hidden = EDITABLE;
+  $("dBtns").replaceChildren(...actionsFor(j).map(([label, change, cls]) => btn(label, cls, () => act(j, label, change))));
+  renderPacket(j);
+  $("dTitle").textContent = j.role || "Untitled role";
+  $("dCo").textContent = j.company || "";
+  const show = (k) => k === "status" ? STAGE_LABEL[j[k]] || j[k]
+    : k === "remote" ? ({ yes: "Yes", no: "No", unknown: "Unconfirmed" }[j[k]] || j[k]) + (j.remoteChecked ? ` (you checked ${j.remoteChecked})` : " (auto-check)")
+    : j[k];
+  $("dFields").replaceChildren(...LABELS.filter(([k]) => j[k] != null && j[k] !== "").map(([k, l]) => {
+    const d = el("div", k === "notes" ? "wide" : null);
+    d.append(el("dt", null, l), el("dd", null, show(k)));
+    return d;
+  }));
+  $("dLink").hidden = !j.url; if (j.url) $("dLink").href = j.url;
+  $("dlg").showModal();
+}
+$("dClose").onclick = () => $("dlg").close();
+
+// "Check for new jobs": runs tools/ingest-alerts.py on the board server (it also runs every few hours).
+let ingestTimer;
+function whenText(iso) {
+  const d = new Date(iso), time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? `today ${time}` : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+function showIngest(s) {
+  const b = $("ingestBtn"), line = $("ingestLine");
+  b.disabled = s.running;
+  b.textContent = s.running ? "Checking…" : "Check for new jobs";
+  line.classList.toggle("bad", !s.running && !!s.last && !s.ok);
+  line.title = s.summary || "";
+  line.textContent = s.running ? "Reading new LinkedIn alerts, a few minutes"
+    : !s.last ? "" : !s.ok ? `Check ${whenText(s.last)} didn't finish (hover for why)`
+    : `Checked ${whenText(s.last)} · ` + (s.added ? `${s.added} new, ${s.remote} remote` : "nothing new");
+}
+async function loadIngest(wasRunning = false) {
+  let s;
+  try { s = await (await fetch("/api/ingest", { cache: "no-store" })).json(); } catch { return; }
+  showIngest(s);
+  clearTimeout(ingestTimer);
+  if (s.running) ingestTimer = setTimeout(() => loadIngest(true), 4000);
+  else if (wasRunning) { lastJobsText = ""; refreshJobs(); }
+}
+if (EDITABLE) {
+  $("ingestBtn").hidden = false;
+  $("ingestBtn").onclick = async () => {
+    try { await post("/api/ingest"); } catch (e) { $("ingestLine").textContent = e.message; }
+    loadIngest(true);
+  };
+  loadIngest();
+}
+$("sortSel").onchange = renderList;
+$("updated").textContent = window.JOBS_UPDATED ? "Last updated " + window.JOBS_UPDATED : "";
+render();
+loadPackets();
+</script>
+</body>
+</html>
