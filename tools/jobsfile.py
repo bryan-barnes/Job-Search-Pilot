@@ -1,4 +1,4 @@
-"""Small, careful edits to jobs.js, shared by the board server and ingest-alerts.py.
+"""Small, careful edits to jobs.js, shared by the board server, ingest-alerts.py, and prep.
 
 jobs.js keeps one job per block, written like this (2-space block indent, 4-space fields,
 one field per line, values are JSON strings or numbers):
@@ -11,15 +11,19 @@ one field per line, values are JSON strings or numbers):
 
 These helpers find a block by id and change single fields in place, so hand-written notes and
 field order survive. They never rewrite the whole file from parsed data.
+
+Works on macOS, Linux, and Windows. All files are read and written as UTF-8.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
-from contextlib import contextmanager
 import re
+import sys
 import tempfile
+import time
+import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -30,15 +34,41 @@ STATUSES = {"new", "found", "applying", "applied", "screen", "interview", "offer
 REMOTE = {"yes", "no", "unknown"}
 
 
+def utf8_stdio() -> None:
+    """Print UTF-8 even where the console or a redirected log defaults to something else
+    (Windows). Call once at the start of each script."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            pass
+
+
 @contextmanager
 def locked():
     """Hold an exclusive lock while reading, changing, and writing jobs.js."""
-    with open(HOME / ".jobs.lock", "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+    with open(HOME / ".jobs.lock", "a+", encoding="utf-8") as fh:
+        if sys.platform == "win32":
+            import msvcrt
+            fh.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def update(change) -> str:
@@ -50,15 +80,22 @@ def update(change) -> str:
 
 
 def read() -> str:
-    return JOBS.read_text()
+    return JOBS.read_text(encoding="utf-8")
 
 
 def write(text: str) -> None:
     """Atomic replace, so the browser or another script never sees a half-written file."""
     fd, tmp = tempfile.mkstemp(dir=JOBS.parent, prefix=".jobs-", suffix=".js")
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    os.replace(tmp, JOBS)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, JOBS)
+            return
+        except PermissionError:  # Windows: another process has jobs.js open for a moment
+            if attempt == 19:
+                raise
+            time.sleep(0.1)
 
 
 def _span(text: str, job_id: str) -> tuple[int, int]:
@@ -113,3 +150,45 @@ def add_note(text: str, job_id: str, note: str) -> str:
 
 def touch(text: str, today: str) -> str:
     return re.sub(r'window\.JOBS_UPDATED = "[^"]*";', f'window.JOBS_UPDATED = "{today}";', text)
+
+
+def ascii_fold(s: str) -> str:
+    """'Zoë Coöp' -> 'Zoe Coop' (drops accents; other non-ASCII letters are removed later)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def slug(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", ascii_fold(s).lower()).strip("-")[:60]
+
+
+def unique_id(text: str, base: str, suffix: str = "") -> str:
+    """A job id not already used in jobs.js: base, else base-<suffix>, else base-2, -3, ..."""
+    taken = set(re.findall(r'\bid:\s*"([^"]+)"', text))
+    base = base or "job"
+    if base not in taken:
+        return base
+    if suffix and f"{base}-{suffix}" not in taken:
+        return f"{base}-{suffix}"
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
+def add_job(text: str, fields: dict) -> str:
+    """Append one job block (fields in the given order, `id` first) before the closing `];`."""
+    if "id" not in fields:
+        raise ValueError("A job needs an id")
+    lines = []
+    for k, v in [("id", fields["id"])] + [(k, v) for k, v in fields.items() if k != "id"]:
+        if v is None or v == "":
+            continue
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k):
+            raise ValueError(f"Bad field name {k!r}")
+        lines.append(f"    {k}: {json.dumps(v, ensure_ascii=False)},")
+    block = "  {\n" + "\n".join(lines) + "\n  },\n"
+    m = re.search(r"^\];", text, re.M)
+    if not m:
+        raise ValueError("Could not find the end of window.JOBS (a line starting with `];`) "
+                         "in jobs.js")
+    return text[:m.start()] + block + text[m.start():]

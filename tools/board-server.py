@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
 """Serve the job board at http://127.0.0.1:8765/ and let its buttons save changes to jobs.js.
 
-Usage:  python3 -I tools/board-server.py      (or double-click "Open Job Board.command")
+Usage:  python3 -I tools/board-server.py      (or double-click "Open Job Board.command" / ".bat")
 
-Only listens on this Mac (127.0.0.1) and only accepts same-origin JSON posts. Serves only
+Only listens on this computer (127.0.0.1) and only accepts same-origin JSON posts. Serves only
 tracker.html and jobs.js, plus a few files from application packets.
 
-POST /api/update  {"id", "status"?, "remote"?, "note"?}   change a job (via jobsfile.py)
+GET  /api/info            which jobs the board can edit, whether LinkedIn alerts are set up
+POST /api/update  {"id", "status"?, "remote"?, "fit"?, "co"?, "like"?, "note"?}   change a job
 POST /api/undo    undo the last change made here, if jobs.js hasn't changed since
+POST /api/lookup  {"url"}  read a posting and suggest its details (for Add job)
+POST /api/add     {"url", "company", "role", "location"?, "pay"?, "remote"?, "notes"?}  add a job
 POST /api/prep    {"id"}  build an application packet in the background (prep-application.py)
 POST /api/prep-batch {"ids": [...]}  queue several packets; PREP_PARALLEL run at a time
 POST /api/build   {"id"}  build the packet's PDFs and Chrome prompt from its .md files
-                       (manual mode, where the agent wrote the .md files by hand)
+POST /api/reply   {"id", "text"}  manual mode: save the AI's pasted reply as the packet's files,
+                       then build
 GET  /api/packets         status.json of every packet, plus the files it contains
-POST /api/open    {"id", "file"?}  open a packet folder or file on this Mac
+POST /api/open    {"id", "file"?}  open a packet folder or file on this computer
 GET  /api/packet/<id>/<file>       read a packet's text file (e.g. apply-in-chrome.md)
-POST /api/ingest          pull new LinkedIn alert jobs now (tools/ingest-alerts.py, in the background)
+POST /api/ingest          check for new jobs now (tools/ingest-alerts.py, in the background)
 GET  /api/ingest          whether that's running, and the last run's result
 
 The server also runs ingest-alerts.py on its own every few hours during the day (AUTO_* below),
-so new alert emails reach the board without anyone clicking.
+so new alert emails reach the board and closed postings leave it without anyone clicking.
 """
 from __future__ import annotations
 
@@ -36,9 +40,11 @@ from pathlib import Path
 from threading import Lock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agent  # noqa: E402
 import jobsfile  # noqa: E402
+import linkedin_check  # noqa: E402
 
-PORT = 8765
+PORT = int(os.environ.get("JOB_BOARD_PORT", "8765"))
 HOME = jobsfile.HOME
 APPS = HOME / "applications"
 FILES = {"/": ("tracker.html", "text/html"), "/tracker.html": ("tracker.html", "text/html"),
@@ -48,7 +54,10 @@ FILES = {"/": ("tracker.html", "text/html"), "/tracker.html": ("tracker.html", "
 PACKET_RE = re.compile(r"^[\w-]+(?:-Resume|-Cover-Letter)?\.(md|pdf|docx)$|^[\w-]+\.log$")
 LABEL = {"passed": "Not interested", "expired": "Posting expired before applying",
          "found": "Moved to Found", "closed": "Closed", "applied": "Applied",
+         "screen": "Moved to Screen", "interview": "Moved to Interview", "offer": "Offer",
          "rejected": "Not selected: they declined to move forward"}
+# Python runs every script in UTF-8 mode, so Windows logs and files never use a legacy code page.
+PY = [sys.executable, "-X", "utf8", "-I"]
 lock = Lock()
 undo_stack: list[tuple[str, str]] = []  # (text before, text after)
 running: dict[str, subprocess.Popen] = {}
@@ -61,38 +70,49 @@ PREP_PARALLEL = 3
 prep_queue: list[str] = []
 
 
+def config() -> dict:
+    try:
+        return json.loads((HOME / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def start_ingest() -> bool:
     """Start ingest-alerts.py unless it's already running. Output goes to ingest.log."""
     global ingest_proc
     with ingest_lock:
         if ingest_proc is not None and ingest_proc.poll() is None:
             return False
-        with open(INGEST_LOG, "w") as log:
+        with open(INGEST_LOG, "w", encoding="utf-8") as log:
             log.write(f"Started {datetime.now():%Y-%m-%d %H:%M}\n")
             log.flush()
             ingest_proc = subprocess.Popen(
-                [sys.executable, "-I", str(HOME / "tools/ingest-alerts.py")],
+                PY + [str(HOME / "tools/ingest-alerts.py")],
                 cwd=HOME, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         return True
 
 
 def ingest_status() -> dict:
     busy = ingest_proc is not None and ingest_proc.poll() is None
+    configured = agent.alerts_configured(config())
     if not INGEST_LOG.exists():
-        return {"running": busy, "last": None, "summary": ""}
-    lines = [ln.strip() for ln in INGEST_LOG.read_text(errors="replace").splitlines() if ln.strip()]
-    summary = next((ln for ln in lines if ln.startswith("Added ")), "")
+        return {"running": busy, "last": None, "summary": "", "configured": configured}
+    lines = [ln.strip() for ln in INGEST_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+             if ln.strip()]
+    summary = next((ln for ln in lines if ln.startswith(("Added ", "Alerts not set up"))), "")
     if not summary and not busy and lines:
-        # No "Added" line means it stopped early (no Keychain key, network down, a crash).
+        # No summary line means it stopped early (no Worker key, network down, a crash).
         summary = "Didn't finish: " + lines[-1][:200]
     last = datetime.fromtimestamp(INGEST_LOG.stat().st_mtime).isoformat(timespec="minutes")
     m = re.match(r"Added (\d+) job\(s\).*?\((\d+) fully remote", summary)
-    return {"running": busy, "last": last, "summary": summary, "ok": bool(m),
+    return {"running": busy, "last": last, "summary": summary, "configured": configured,
+            "ok": bool(m) or summary.startswith("Alerts not set up"),
             "added": int(m.group(1)) if m else None, "remote": int(m.group(2)) if m else None}
 
 
 def auto_ingest() -> None:
-    """Run the ingest every AUTO_EVERY seconds during AUTO_HOURS."""
+    """Run the ingest every AUTO_EVERY seconds during AUTO_HOURS. Without LinkedIn alerts set
+    up, that run only re-checks open jobs for closed postings."""
     while True:
         last = INGEST_LOG.stat().st_mtime if INGEST_LOG.exists() else 0
         if datetime.now().hour in AUTO_HOURS and time.time() - last >= AUTO_EVERY:
@@ -102,6 +122,10 @@ def auto_ingest() -> None:
 
 def valid_id(job_id) -> bool:
     return isinstance(job_id, str) and re.fullmatch(r"[a-z0-9-]{1,120}", job_id) is not None
+
+
+def clean(value, limit: int = 300) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,6 +154,14 @@ class Handler(BaseHTTPRequestHandler):
         if path in FILES:
             name, ctype = FILES[path]
             return self._send(200, (HOME / name).read_bytes(), ctype)
+        if path == "/favicon.ico":
+            return self._send(204, b"", "image/x-icon")
+        if path == "/api/info":
+            cfg = config()
+            return self._json(200, {"editable": jobsfile.ids(jobsfile.read()),
+                                    "alerts": agent.alerts_configured(cfg),
+                                    "runner": agent.runner_name(cfg),
+                                    "windows": sys.platform == "win32"})
         if path == "/api/packets":
             return self._json(200, packets())
         if path == "/api/ingest":
@@ -150,11 +182,19 @@ class Handler(BaseHTTPRequestHandler):
         if not self._same_origin():
             return self._json(403, {"error": "Forbidden"})
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 2))
+            length = int(self.headers.get("Content-Length", 0))
+            if length > 2_000_000:
+                return self._json(413, {"error": "Too large"})
+            body = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
             return self._json(400, {"error": "Bad JSON"})
+        if not isinstance(body, dict):
+            return self._json(400, {"error": "Bad JSON"})
+        if self.path == "/api/lookup":  # network only, so it doesn't hold the lock
+            return self._lookup(body)
         route = {"/api/update": self._update, "/api/undo": self._undo, "/api/prep": self._prep,
                  "/api/prep-batch": self._prep_batch, "/api/build": self._build,
+                 "/api/reply": self._reply, "/api/add": self._add,
                  "/api/open": self._open, "/api/ingest": self._ingest}.get(self.path)
         if not route:
             return self._json(404, {"error": "Not found"})
@@ -168,6 +208,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": f"Unknown status {status!r}"})
         if remote is not None and remote not in jobsfile.REMOTE:
             return self._json(400, {"error": f"Unknown remote value {remote!r}"})
+        scores = {k: body[k] for k in ("fit", "co", "like") if k in body}
+        for k, v in scores.items():
+            if v is not None and (not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 5):
+                return self._json(400, {"error": f"{k} must be 1 to 5"})
         today = date.today().isoformat()
 
         def change(text):
@@ -178,6 +222,8 @@ class Handler(BaseHTTPRequestHandler):
             if remote:
                 text = jobsfile.set_field(text, job_id, "remote", remote)
                 text = jobsfile.set_field(text, job_id, "remoteChecked", today)
+            for k, v in scores.items():
+                text = jobsfile.set_field(text, job_id, k, v)
             label = LABEL.get(status) or {"no": "Checked: not fully remote",
                                           "yes": "Checked: fully remote"}.get(remote, "")
             if label:
@@ -191,7 +237,8 @@ class Handler(BaseHTTPRequestHandler):
                 text = change(before)
                 jobsfile.write(text)
         except KeyError:
-            return self._json(404, {"error": f"No job with id {job_id!r}"})
+            return self._json(404, {"error": f"The board can't edit {job_id!r}: its block in jobs.js "
+                                             "isn't in the format shown at the top of that file."})
         except ValueError as exc:
             return self._json(400, {"error": str(exc)})
         undo_stack.append((before, text))
@@ -211,6 +258,47 @@ class Handler(BaseHTTPRequestHandler):
             undo_stack.pop()
             jobsfile.write(before)
         self._json(200, {"ok": True})
+
+    def _lookup(self, body: dict):
+        url = clean(body.get("url"), 2000)
+        if not re.match(r"https?://", url):
+            return self._json(400, {"error": "Paste the posting's full link (starting with https://)"})
+        self._json(200, linkedin_check.lookup(url))
+
+    def _add(self, body: dict):
+        url = clean(body.get("url"), 2000)
+        company, role = clean(body.get("company"), 200), clean(body.get("role"), 200)
+        remote = body.get("remote") or "unknown"
+        if url and not re.match(r"https?://", url):
+            return self._json(400, {"error": "The link must start with https://"})
+        if not company or not role:
+            return self._json(400, {"error": "Company and role are both needed"})
+        if remote not in jobsfile.REMOTE:
+            return self._json(400, {"error": f"Unknown remote value {remote!r}"})
+        today = date.today().isoformat()
+        notes = clean(body.get("notes"), 1000)
+        evidence = clean(body.get("evidence"), 200)
+        if evidence and remote != "unknown":
+            notes = (notes + " " if notes else "") + f'Posting says: "{evidence}".'
+        try:
+            with jobsfile.locked():
+                text = jobsfile.read()
+                if url and json.dumps(url) in text:
+                    return self._json(409, {"error": "That link is already on the board"})
+                jid = jobsfile.unique_id(text, jobsfile.slug(f"{company} {role}"))
+                new = jobsfile.add_job(text, {
+                    "id": jid, "company": company, "role": role,
+                    "pay": clean(body.get("pay"), 100), "location": clean(body.get("location"), 200),
+                    "url": url, "source": "Added on the board", "status": "found", "remote": remote,
+                    # You chose remote yes/no yourself in the form, so it counts as checked.
+                    "remoteChecked": today if remote != "unknown" else None,
+                    "notes": notes, "added": today,
+                })
+                jobsfile.write(jobsfile.touch(new, today))
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+        undo_stack.append((text, jobsfile.touch(new, today)))
+        self._json(200, {"ok": True, "id": jid})
 
     def _prep(self, body: dict):
         err = prep_problem(body.get("id"))
@@ -248,17 +336,37 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "No packet for that job yet"})
         if job_id in running and running[job_id].poll() is None:
             return self._json(409, {"error": "Already building this one"})
-        missing = [n for n in ("resume.md", "cover-letter.md", "answers.md")
-                   if not (APPS / job_id / n).is_file()]
+        missing = [n for n in agent.WRITES[:3] if not (APPS / job_id / n).is_file()]
         if missing:
             return self._json(400, {"error": "Missing " + ", ".join(missing)
-                                    + "; follow RUN-THIS.md and get them written first"})
-        write_status(job_id, "running", "Building documents")
-        with open(APPS / job_id / "build.log", "w") as log:
-            running[job_id] = subprocess.Popen(
-                [sys.executable, "-I", str(HOME / "tools/prep-application.py"), job_id, "--build-only"],
-                cwd=HOME, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                                    + "; paste the AI's reply first"})
+        start_build(job_id)
         self._json(200, {"ok": True})
+
+    def _reply(self, body: dict):
+        job_id, text = body.get("id"), str(body.get("text") or "")
+        if not valid_id(job_id) or not (APPS / job_id).is_dir():
+            return self._json(404, {"error": "No packet for that job yet"})
+        if job_id in running and running[job_id].poll() is None:
+            return self._json(409, {"error": "Already building this one"})
+        files = agent.split_reply(text)
+        if "NEEDS-POSTING.md" in files:
+            (APPS / job_id / "NEEDS-POSTING.md").write_text(files["NEEDS-POSTING.md"], encoding="utf-8")
+            return self._json(400, {"error": "The AI says it couldn't do it: "
+                                    + files["NEEDS-POSTING.md"].strip()[:300]})
+        missing = [n for n in agent.WRITES[:3] if n not in files]
+        if not files:
+            return self._json(400, {"error": "That doesn't look like the AI's reply: it has no line like "
+                                    "@@@ FILE: resume.md @@@. Copy the AI's whole reply and paste it again."})
+        if missing:
+            return self._json(400, {"error": f"The reply has {', '.join(files)}, but not {', '.join(missing)}. "
+                                    "Copy the AI's whole reply (each part starts with a line like "
+                                    "@@@ FILE: resume.md @@@) and paste it again. If it stopped early, "
+                                    "ask it to continue."})
+        for name, content in files.items():
+            (APPS / job_id / name).write_text(content, encoding="utf-8")
+        start_build(job_id)
+        self._json(200, {"ok": True, "saved": sorted(files)})
 
     def _open(self, body: dict):
         job_id, name = body.get("id"), body.get("file")
@@ -271,8 +379,10 @@ class Handler(BaseHTTPRequestHandler):
             target = target / name
         if sys.platform == "win32":
             os.startfile(str(target))  # type: ignore[attr-defined]
-        else:
+        elif sys.platform == "darwin":
             subprocess.run(["open", str(target)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(target)], check=False)
         self._json(200, {"ok": True})
 
 
@@ -287,7 +397,8 @@ def prep_problem(job_id) -> tuple[int, str] | None:
 def write_status(job_id: str, state: str, step: str) -> None:
     (APPS / job_id).mkdir(parents=True, exist_ok=True)
     (APPS / job_id / "status.json").write_text(json.dumps(
-        {"state": state, "step": step, "updated": datetime.now().isoformat(timespec="seconds")}))
+        {"state": state, "step": step, "updated": datetime.now().isoformat(timespec="seconds")}),
+        encoding="utf-8")
 
 
 def mark_applying(job_id: str) -> None:
@@ -302,9 +413,18 @@ def start_prep(job_id: str) -> None:
     """Run prep-application.py for one job in the background. Call with `lock` held."""
     mark_applying(job_id)
     write_status(job_id, "running", "Starting")
-    with open(APPS / job_id / "prep.log", "w") as log:
+    with open(APPS / job_id / "prep.log", "w", encoding="utf-8") as log:
         running[job_id] = subprocess.Popen(
-            [sys.executable, "-I", str(HOME / "tools/prep-application.py"), job_id],
+            PY + [str(HOME / "tools/prep-application.py"), job_id],
+            cwd=HOME, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def start_build(job_id: str) -> None:
+    """Build the packet's documents from its .md files (prep-application.py --build-only)."""
+    write_status(job_id, "running", "Building documents")
+    with open(APPS / job_id / "build.log", "w", encoding="utf-8") as log:
+        running[job_id] = subprocess.Popen(
+            PY + [str(HOME / "tools/prep-application.py"), job_id, "--build-only"],
             cwd=HOME, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -321,17 +441,19 @@ def run_prep_queue() -> None:
 
 def packets() -> dict:
     out = {}
+    if not APPS.is_dir():
+        return out
     for f in APPS.glob("*/status.json"):
         try:
-            data = json.loads(f.read_text())
-        except ValueError:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
         job_id = f.parent.name
         proc = running.get(job_id)
         if data.get("state") == "running" and (proc is None or proc.poll() is not None):
             # The prep process ended without reporting (crash or server restart).
-            if proc is not None or data.get("step") == "Starting":
-                data = {**data, "state": "failed", "step": "Stopped unexpectedly; see prep.log"}
+            if proc is not None or data.get("step") in ("Starting", "Building documents"):
+                data = {**data, "state": "failed", "step": "Stopped unexpectedly; see prep.log or build.log"}
         if data.get("state") == "queued" and job_id not in prep_queue:
             data = {**data, "state": "failed", "step": "The board restarted before this one ran; click Try again"}
         data["files"] = sorted(x.name for x in f.parent.iterdir()
@@ -341,6 +463,10 @@ def packets() -> dict:
 
 
 def main() -> None:
+    jobsfile.utf8_stdio()
+    made = agent.ensure_personal_files()
+    if made:
+        print("Created from templates/: " + ", ".join(made), flush=True)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     except OSError:

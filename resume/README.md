@@ -1,6 +1,7 @@
 # The master resume
 
-`master.md` is the one-page source of truth. Every application packet starts from it (or from one
+`master.md` is the one-page source of truth. It's yours: it's created from
+`../templates/master.md` the first time you run the tools, and never committed. Every application packet starts from it (or from one
 of the bases in `../bases/`) and gets a light per-job variant.
 
 ## Format the builders expect
@@ -24,11 +25,11 @@ No tables, no links with markup, no images. Keep it to one page.
 ## Rebuilding the .docx and .pdf
 
 ```
-zsh tools/rebuild-resume.sh
+python3 tools/rebuild-resume.py        (Windows: py tools\rebuild-resume.py)
 ```
 
 It writes `Your-Name-Resume.docx` and `Your-Name-Resume.pdf` next to `master.md` and prints the
-page count. It needs `node`, Google Chrome, and `pdfinfo` (poppler).
+page count. It needs Node.js (with `npm install` done in `tools/`) and Google Chrome.
 
 ## Rules
 

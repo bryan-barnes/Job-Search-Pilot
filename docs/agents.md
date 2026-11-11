@@ -8,59 +8,66 @@ directly.
 
 ## The three runners
 
-### `opencode` — the OpenCode CLI
+### `manual`: no install, any AI chat (the default)
 
-The most flexible: any provider or model you've configured for OpenCode.
+Works with any AI assistant, including Claude or ChatGPT in the browser.
 
-- Install: `npm install -g opencode-ai` (or the installer in OpenCode's docs), then `opencode`
-  once to log in to your provider.
-- Config: `agent.runner: "opencode"`, and `agent.model` — `null` uses whatever OpenCode is
-  configured with, or a specific `provider/model` ID (run `opencode models` to list them).
-- How it runs: `opencode run --auto --archived --model <model> <prompt>` with the packet
-  folder as the working directory. `--auto` accepts its file tools; `--archived` keeps the
-  session out of your normal list. Its permissions come from your OpenCode config
-  (`~/.config/opencode/opencode.json`): the prompt needs file reads/edits in the packet
-  folder and, for one fallback, webfetch. No browser.
-
-### `claude` — the Claude Code CLI
-
-Good if you already have a Claude subscription you want to spend on this.
-
-- Install: `npm install -g @anthropic-ai/claude-code`, then `claude` once to log in.
-- Config: `agent.runner: "claude"`. (`agent.model` is ignored.)
-- How it runs: `claude -p <prompt> --permission-mode acceptEdits` with the packet folder as
-  the working directory. `acceptEdits` lets it write the packet files without asking; it has
-  no browser and can't leave the folder the prompt points at.
-
-### `manual` — no CLI, you paste the prompt
-
-Works with any AI assistant, including the web versions of Claude or ChatGPT.
-
-- Config: `agent.runner: "manual"`. No CLI needed; `setup.sh` won't warn you about one.
-- How it works: instead of running anything, the script writes the full prompt to
-  `RUN-THIS.md` in the packet folder and the packet waits in `manual` state. You open
-  `RUN-THIS.md`, paste it into your assistant (give it the packet folder's files, or the
-  assistant's file access), and tell it to work only in that folder. When the four files
-  (`resume.md`, `cover-letter.md`, `answers.md`, `fit-check.md`) are in the folder, click
-  **Build documents** on the board and the PDFs and the Chrome prompt are built the same way
-  as in the other modes.
+- Config: `agent.runner: "manual"`.
+- How it works: **Prep application** saves the posting and writes `RUN-THIS.md` in the packet
+  folder: one self-contained prompt with the instructions and every file the AI needs (the
+  posting, `about-me.md`, your canned answers, experience bank, profile, master resume, and any
+  bases) pasted inside it. On the board, click **Copy the prompt**, paste it into a new chat,
+  and send it. The AI replies with four sections, each starting with a line like
+  `@@@ FILE: resume.md @@@`. Copy its whole reply, paste it into the box on the board, and
+  click **Save reply and build**: the board splits it into `resume.md`, `cover-letter.md`,
+  `answers.md`, and `fit-check.md`, then builds the PDFs and the Chrome prompt.
+- If you'd rather write the files yourself (or with an AI that has file access), put them in
+  the packet folder and click **Build documents**.
 - Trade-offs: the one-page trim pass can't run (there's no agent to ask), so the build check
   just reports the page counts; and alert pre-scoring is skipped.
+
+### `claude`: the Claude Code CLI
+
+Good if you have a Claude subscription and want the packets written for you.
+
+- Install: see https://docs.claude.com/en/docs/claude-code (native installer, or
+  `npm install -g @anthropic-ai/claude-code`), then run `claude` once to log in.
+- Config: `agent.runner: "claude"`. (`agent.model` is ignored.)
+- How it runs: `claude -p --permission-mode acceptEdits` with the packet folder as the working
+  directory and the prompt on stdin. `acceptEdits` lets it write the packet files without
+  asking. It has no browser.
+
+### `opencode`: the OpenCode CLI
+
+The most flexible: any provider or model you've configured for OpenCode, including local ones.
+
+- Install: `npm install -g opencode-ai` (or the installer in OpenCode's docs), then `opencode`
+  once to set up your provider.
+- Config: `agent.runner: "opencode"`, and `agent.model`: `null` uses whatever OpenCode is
+  configured with, or a specific `provider/model` ID (run `opencode models` to list them).
+- How it runs: `opencode run --auto --archived --file PROMPT.md "Follow the instructions in the
+  attached file PROMPT.md."` with the packet folder as the working directory (the prompt file
+  is deleted afterwards). `--auto` accepts its file tools; `--archived` keeps the session out
+  of your normal list. Its permissions come from your OpenCode config: the prompt needs file
+  reads and edits in the packet folder and, for one fallback, webfetch.
+
+The prompt never goes on the command line, because on Windows the CLIs are `.cmd` wrappers and
+a multi-line argument gets cut off there.
 
 ## What the agent may touch
 
 Whatever the runner, the working directory is the packet folder (or a scratch directory for
 scoring), and the prompts tell the agent to work only there. The prompt
 (`tools/application-prompt.md`) fixes the sources it may claim from: the master resume, the
-bases, `canned-answers.md`, `experience-bank.md`, and the owner's own words in `AGENTS.md`. It
+bases, `canned-answers.md`, `experience-bank.md`, and the owner's own words in `about-me.md`. It
 must not invent metrics, and it must write `fit-check.md` naming the real gaps. You review
 every file before anything is sent, and Claude in Chrome stops before Submit.
 
 ## Privacy notes
 
 - In `opencode`/`claude` mode the prompt and your resume go to that provider's API. Pick a
-  provider whose data terms you're comfortable with, and keep the files in this folder
-  gitignored (they are: `applications/`, `config.json`, `resume/*.pdf`, `resume/*.docx`).
+  provider whose data terms you're comfortable with, and keep your files private
+  (they're gitignored: your files from `templates/`, `applications/`, `config.json`, the PDFs).
 - In `manual` mode you control exactly which assistant sees the files.
 - The alert pre-scoring (off by default) sends only job titles, companies, and locations plus
   your master resume.

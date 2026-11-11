@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Job Search Board</title>
+<title>Job Search Pilot</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c24100'/%3E%3Cpath d='M13 33 51 15 41 50 31 38z' fill='%23fff'/%3E%3Cpath d='M31 38 51 15 27 36z' fill='%23fde9df'/%3E%3Cpath d='M27 36 31 38 28 47z' fill='%23fff' opacity='.85'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
@@ -128,11 +129,12 @@ textarea { min-height: 84px; resize: vertical; }
 <div class="wrap">
   <header>
     <div class="head-main">
-      <h1>Job Search Board</h1>
+      <h1>Job Search Pilot</h1>
       <p class="sub">Ranked by fit, company, and how much you'd like the job. Each score is 1 to 5, for 15 points total.</p>
     </div>
     <div class="fetch">
-      <button type="button" class="btn" id="ingestBtn" hidden>Check for new jobs</button>
+      <div class="fetch-btns"><button type="button" class="btn primary" id="addBtn" hidden>Add job</button>
+      <button type="button" class="btn" id="ingestBtn" hidden>Check for new jobs</button></div>
       <span class="fetch-line" id="ingestLine"></span>
       <span class="fetch-line" id="updated" hidden></span>
     </div>
@@ -167,13 +169,47 @@ textarea { min-height: 84px; resize: vertical; }
     <div class="empty">Loading your jobs…</div>
   </section>
 
-  <p class="note">Only fully remote jobs are listed. Jobs whose posting expired before you applied are removed from the board. Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. Click a job to mark it Interested, Not interested, Posting expired, or Not selected (they declined to move you forward) (open the board with <code>Open Job Board.command</code> so the buttons can save). For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
+  <p class="note">Only fully remote jobs are listed. Jobs whose posting closed before you applied are removed from the board (the board re-checks open postings every few hours). Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. <span id="alertsNote" hidden>New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. </span>Click a job to score it, move it along, or mark it Not interested, Posting expired, or Not selected. For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
 </div>
+
+<dialog id="addDlg" aria-labelledby="addTitle">
+  <form class="ed" id="addForm" method="dialog">
+    <h3 id="addTitle">Add a job</h3>
+    <p class="hint">Paste the posting's link and click Look up: it fills in what it can from the page. Use the employer's own careers page or LinkedIn when you can (job aggregators keep closed postings up).</p>
+    <div class="lookup">
+      <label class="field" for="aUrl">Link to the posting
+        <input id="aUrl" type="url" autocomplete="off" placeholder="https://...">
+      </label>
+      <button type="button" class="btn" id="aLookup">Look up</button>
+    </div>
+    <p class="status" id="aLookupLine"></p>
+    <div class="grid2">
+      <label class="field" for="aRole">Role <input id="aRole" type="text" required maxlength="200" autocomplete="off"></label>
+      <label class="field" for="aCompany">Company <input id="aCompany" type="text" required maxlength="200" autocomplete="off"></label>
+      <label class="field" for="aLocation">Location <input id="aLocation" type="text" maxlength="200" autocomplete="off"></label>
+      <label class="field" for="aPay">Pay (as the posting says it) <input id="aPay" type="text" maxlength="100" autocomplete="off"></label>
+    </div>
+    <label class="field" for="aRemote">Fully remote?
+      <select id="aRemote">
+        <option value="unknown">Not sure yet (check it later)</option>
+        <option value="yes">Yes, fully remote: I checked the posting</option>
+        <option value="no">No, hybrid or on-site</option>
+      </select>
+    </label>
+    <p class="hint" id="aEvidence"></p>
+    <label class="field" for="aNotes">Notes (optional)
+      <input id="aNotes" type="text" maxlength="1000" autocomplete="off" placeholder="e.g. a friend works there">
+    </label>
+    <div class="actions"><span class="status" id="aStatus" role="status"></span><div><button type="button" class="btn" id="aCancel">Cancel</button><button type="submit" class="btn primary" id="aSave">Add to the board</button></div></div>
+  </form>
+</dialog>
 
 <dialog id="dlg" aria-labelledby="dTitle">
   <div class="ed">
     <h3 id="dTitle"></h3>
     <p class="sub" id="dCo"></p>
+    <p class="confirm" id="dBadFormat" hidden>The board can't edit this job: its block in <code>jobs.js</code> isn't in the format shown at the top of that file (2-space braces, 4-space fields, one per line, unquoted names). Fix it there, or ask an agent to.</p>
+    <div class="scores" id="dScores"></div>
     <dl class="grid2" id="dFields"></dl>
     <div class="triage" id="dTriage">
       <label class="field" for="dReason">Reason (optional, saved to notes)
@@ -184,9 +220,10 @@ textarea { min-height: 84px; resize: vertical; }
     <div class="packet" id="dPacket" hidden>
       <h4>Application packet</h4>
       <p class="status" id="dPacketLine"></p>
+      <div id="dReply"></div>
       <div class="triage-btns" id="dPacketBtns"></div>
     </div>
-    <p class="hint" id="dReadonly" hidden>To use the buttons, open the board with <strong>Open Job Board.command</strong> in the job-search folder.</p>
+    <p class="hint" id="dReadonly" hidden>To use the buttons, open the board with <strong>Open Job Board</strong> (.command on a Mac, .bat on Windows) in this folder.</p>
     <div class="actions"><span class="status" id="dStatus" role="status"></span><div><a class="btn" id="dLink" target="_blank" rel="noopener">Open posting</a><button class="btn primary" type="button" id="dClose">Close</button></div></div>
   </div>
 </dialog>
@@ -226,6 +263,14 @@ textarea { min-height: 84px; resize: vertical; }
   .prepbar[hidden] { display: none; }
   .prepbar p { margin: 0; font-size: 0.9rem; max-width: 62ch; }
   .prepbar div { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fetch-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .lookup { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+  .lookup input { width: 100%; }
+  .scores .field { gap: 6px; }
+  .reply { display: grid; gap: 8px; }
+  .reply textarea { width: 100%; min-height: 120px; font: 0.82rem/1.4 var(--mono); }
+  .steps { margin: 0; padding-left: 20px; font-size: 0.88rem; display: grid; gap: 4px; }
+  .confirm code { font-family: var(--mono); font-size: 0.8rem; }
 </style>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <script src="jobs.js"></script>
@@ -242,14 +287,15 @@ let filter = "active";
 let showHidden = false;
 let packets = {};
 let lastOpened = null;
+let info = { editable: null, alerts: false, runner: "manual", windows: false }; // from /api/info
 const prepPicked = new Set(); // jobs ticked in Prep packets mode
 const checkedNow = new Map(); // jobs marked during this Check remote round stay on screen until "Done checking"
 // The board lists fully remote jobs only. Expired postings (closed before you applied) never show.
 const isRemote = (j) => j.remote === "yes";
 // Anything the auto-check decided (remote, hybrid, or unsure) waits for you to confirm it.
-const needsCheck = (j) => j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked;
+const needsCheck = (j) => j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked && editable(j);
 // Ready for a packet: not applied yet, remote confirmed by you, no packet yet.
-const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && j.remote === "yes" && !!j.remoteChecked && !packets[j.id];
+const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && j.remote === "yes" && !!j.remoteChecked && !packets[j.id] && editable(j);
 const visible = (j) => j.status !== "expired" && (showHidden || isRemote(j));
 const inStage = (j, k) => k === "active" ? ACTIVE.has(j.status || "found") : (j.status || "found") === k;
 const $ = (id) => document.getElementById(id);
@@ -257,6 +303,8 @@ const today = () => new Date(new Date().toDateString());
 const days = (iso) => iso ? Math.floor((today() - new Date(iso + "T00:00:00")) / 864e5) : null;
 const total = (j) => (j.fit || 0) + (j.co || 0) + (j.like || 0);
 const rated = (j) => [j.fit, j.co, j.like].filter(Boolean).length;
+const editable = (j) => !info.editable || info.editable.includes(j.id);
+const LAUNCHER = () => info.windows ? "Open Job Board.bat" : "Open Job Board.command";
 
 function chipsFor(j) {
   const c = [], s = j.status || "found";
@@ -271,7 +319,8 @@ function chipsFor(j) {
   if (j.blocker) c.push([j.blocker.length > 28 ? j.blocker.slice(0, 26) + "…" : j.blocker, "bad"]);
   if (!isRemote(j)) c.push([j.remote === "no" ? (j.remoteChecked ? "Not remote" : "Not remote (auto-check)") : "Remote unconfirmed", "bad"]);
   else if (needsCheck(j)) c.push(["Check remote", "warn"]);
-  if (rated(j) < 3) c.push(["Needs scores", ""]);
+  if (EDITABLE && !editable(j)) c.push(["Can't edit: check jobs.js", "bad"]);
+  else if (rated(j) < 3) c.push(["Needs scores", ""]);
   return c;
 }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -392,7 +441,7 @@ async function post(path, body) {
   try {
     r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    throw new Error("Can't reach the board server. Double-click “Open Job Board.command”, then reload this page and try again.");
+    throw new Error(`Can't reach the board server. Double-click “${LAUNCHER()}”, then reload this page and try again.`);
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Save failed (${r.status})`);
@@ -454,6 +503,7 @@ async function refreshJobs() {
   try { new Function("window", text)(w); } catch { return; }
   lastJobsText = text;
   jobs.splice(0, jobs.length, ...(w.JOBS || []).map((j, i) => ({ id: j.id || String(i), ...j })));
+  loadInfo();
   if (w.JOBS_UPDATED) $("updated").textContent = "Last updated " + w.JOBS_UPDATED;
   render();
 }
@@ -474,7 +524,9 @@ window.addEventListener("focus", () => {
 function actionsFor(j) {
   const s = j.status || "found", a = [];
   if (s === "new") a.push(["Interested", { status: "found" }, "primary"]);
-  if (s === "applying") a.push(["Mark applied", { status: "applied" }, "primary"]);
+  if (NOT_APPLIED.has(s)) a.push(["Mark applied", { status: "applied" }, s === "applying" ? "primary" : ""]);
+  const next = { applied: ["Got a screen", "screen"], screen: ["Got an interview", "interview"], interview: ["Got an offer", "offer"] }[s];
+  if (next) a.push([next[0], { status: next[1] }, "primary"]);
   if (["applying","applied","screen","interview","offer"].includes(s)) a.push(["Not selected", { status: "rejected" }, "danger"]);
   if (ACTIVE.has(s)) a.push(["Not interested", { status: "passed" }, "danger"]);
   if (NOT_APPLIED.has(s)) a.push(["Posting expired", { status: "expired" }, ""]);
@@ -493,13 +545,18 @@ function renderPacket(j) {
   const line = $("dPacketLine"), btns = $("dPacketBtns");
   const open = (label, file) => btn(label, "", () => post("/api/open", { id: j.id, file }).catch((e) => line.textContent = e.message));
   const prep = (label) => btn(label, packets[j.id] ? "" : "primary", async () => {
-    if (label === "Rebuild" && !confirm("Rebuild writes a new resume, cover letter, and answers from scratch, replacing any edits. The current versions are saved in the packet's previous/ folder. Rebuild?")) return;
+    if (label === "Write it again" && !confirm("This writes a new resume, cover letter, and answers from scratch, replacing any edits. The current versions are saved in the packet's previous/ folder. Write it again?")) return;
     try { await post("/api/prep", { id: j.id }); packets[j.id] = { state: "running", step: "Starting" };
       if (NOT_APPLIED.has(s) && s !== "applying") j.status = "applying";
       renderPacket(j); render(); poll(); }
     catch (e) { line.textContent = e.message; }
   });
+  const build = (label, cls) => btn(label, cls || "", async () => {
+    try { await post("/api/build", { id: j.id }); packets[j.id] = { state: "running", step: "Building documents" }; renderPacket(j); poll(); }
+    catch (e) { line.textContent = e.message; }
+  });
   btns.replaceChildren();
+  $("dReply").replaceChildren();
   if (!pk) {
     line.textContent = NOT_APPLIED.has(s) ? "No packet yet. Prep application writes a tailored resume, cover letter, answers, and a Claude in Chrome prompt (a few minutes)." : "No packet for this job.";
     if (NOT_APPLIED.has(s)) btns.append(prep("Prep application"));
@@ -511,16 +568,28 @@ function renderPacket(j) {
     line.textContent = `Packet failed: ${pk.step}`;
     btns.append(prep("Try again"), open("Open folder"));
   } else if (pk.state === "manual") {
-    line.textContent = "Manual mode: read RUN-THIS.md and paste it into your AI assistant. When resume.md, cover-letter.md, and answers.md are in the folder, build the PDFs.";
-    btns.append(
-      open("Read RUN-THIS.md", "RUN-THIS.md"),
-      btn("Build documents", "primary", async () => {
-        try { await post("/api/build", { id: j.id }); packets[j.id] = { state: "running", step: "Building documents" }; renderPacket(j); poll(); }
-        catch (e) { line.textContent = e.message; }
-      }),
-      open("Open folder"));
+    line.textContent = "The prompt is ready. Your AI assistant writes the documents:";
+    const steps = el("ol", "steps");
+    steps.append(el("li", null, "Click Copy the prompt."),
+      el("li", null, "Paste it into a new chat in Claude, ChatGPT, or any AI assistant, and send it."),
+      el("li", null, "Copy its whole reply (most have a copy button under the reply) and paste it below."));
+    const box = el("textarea"); box.id = "dReplyText"; box.placeholder = "Paste the AI's whole reply here. It starts with @@@ FILE: resume.md @@@";
+    box.setAttribute("aria-label", "The AI's reply");
+    const save = btn("Save reply and build", "primary", async () => {
+      if (!box.value.trim()) { line.textContent = "Paste the reply first."; return; }
+      save.disabled = true;
+      try { const r = await post("/api/reply", { id: j.id, text: box.value }); packets[j.id] = { state: "running", step: "Building documents" }; renderPacket(j); poll(); }
+      catch (e) { line.textContent = e.message; save.disabled = false; }
+    });
+    const copy = btn("Copy the prompt", "primary", async () => {
+      try { const r = await fetch(`/api/packet/${j.id}/RUN-THIS.md`); await navigator.clipboard.writeText(await r.text()); copy.textContent = "Copied"; }
+      catch (e) { line.textContent = "Couldn't copy: " + e.message + ". Open RUN-THIS.md in the folder instead."; }
+    });
+    const wrap = el("div", "reply"); wrap.append(steps, box);
+    $("dReply").append(wrap);
+    btns.append(copy, save, el("span", "hint", "Wrote the files yourself?"), build("Build documents"), open("Open folder"));
   } else {
-    line.textContent = pk.step + ". Read fit-check.md first, then paste the Chrome prompt into Claude in Chrome.";
+    line.textContent = pk.step + ". Read the fit check first, then the letter and resume. Edited the .md files? Click Rebuild documents. Then copy the Chrome prompt into Claude in Chrome.";
     // The PDF buttons come from the packet's actual files (the builders name them after your name).
     const pdfs = (pk.files || []).filter((f) => f.endsWith(".pdf")).map((f) =>
       open(f.includes("Resume") ? "Resume PDF" : "Cover letter PDF", f));
@@ -532,7 +601,7 @@ function renderPacket(j) {
       open("Fit check", "fit-check.md"),
       ...pdfs,
       open("Answers", "answers.md"),
-      open("Open folder"), prep("Rebuild"));
+      open("Open folder"), build("Rebuild documents"), prep("Write it again"));
   }
 }
 let pollTimer, openJob = null;
@@ -544,11 +613,14 @@ async function loadPackets() {
 }
 function poll() { clearTimeout(pollTimer); pollTimer = setTimeout(loadPackets, 5000); }
 
-const LABELS = [["status","Stage"],["pay","Pay"],["location","Location"],["remote","Fully remote"],["source","Found via"],["fit","Fit (1–5)"],["co","Company (1–5)"],["like","Me (1–5)"],["applied","Applied"],["lastContact","Last reply"],["contact","Contact"],["resume","Resume sent"],["next","Next step"],["nextDate","Next step date"],["blocker","Dealbreaker or risk"],["added","Added"],["notes","Notes"]];
+const LABELS = [["status","Stage"],["pay","Pay"],["location","Location"],["remote","Fully remote"],["source","Found via"],["applied","Applied"],["lastContact","Last reply"],["contact","Contact"],["resume","Resume sent"],["next","Next step"],["nextDate","Next step date"],["blocker","Dealbreaker or risk"],["added","Added"],["notes","Notes"]];
 function openDetails(j) {
   openJob = j;
   $("dReason").value = ""; $("dStatus").textContent = "";
-  $("dTriage").hidden = !EDITABLE; $("dReadonly").hidden = EDITABLE;
+  const canEdit = EDITABLE && editable(j);
+  $("dTriage").hidden = !canEdit; $("dReadonly").hidden = EDITABLE;
+  $("dBadFormat").hidden = !EDITABLE || editable(j);
+  renderScores(j, canEdit);
   $("dBtns").replaceChildren(...actionsFor(j).map(([label, change, cls]) => btn(label, cls, () => act(j, label, change))));
   renderPacket(j);
   $("dTitle").textContent = j.role || "Untitled role";
@@ -566,6 +638,26 @@ function openDetails(j) {
 }
 $("dClose").onclick = () => $("dlg").close();
 
+// The three 1-5 scores, editable in the job dialog. Click a number to set it, click it again to clear.
+const SCORES = [["fit", "Fit", "How well you match the requirements"], ["co", "Company", "How much you want to work there"], ["like", "Me", "How much you'd enjoy the work"]];
+function renderScores(j, canEdit) {
+  $("dScores").replaceChildren(...SCORES.map(([k, label, help]) => {
+    const f = el("div", "field"); f.append(el("span", null, `${label}: ${help}`));
+    const pick = el("div", "pick"); pick.setAttribute("role", "group"); pick.setAttribute("aria-label", label);
+    for (let n = 1; n <= 5; n++) {
+      const b = el("button", null, String(n)); b.type = "button"; b.disabled = !canEdit;
+      b.setAttribute("aria-pressed", String(j[k] === n));
+      b.onclick = async () => {
+        const v = j[k] === n ? null : n;
+        try { await post("/api/update", { id: j.id, [k]: v }); if (v == null) delete j[k]; else j[k] = v; renderScores(j, canEdit); render(); }
+        catch (e) { $("dStatus").textContent = e.message; }
+      };
+      pick.append(b);
+    }
+    f.append(pick); return f;
+  }));
+}
+
 // "Check for new jobs": runs tools/ingest-alerts.py on the board server (it also runs every few hours).
 let ingestTimer;
 function whenText(iso) {
@@ -574,6 +666,9 @@ function whenText(iso) {
 }
 function showIngest(s) {
   const b = $("ingestBtn"), line = $("ingestLine");
+  // Without LinkedIn alerts set up, the server still re-checks postings quietly; nothing to show.
+  b.hidden = !s.configured; $("alertsNote").hidden = !s.configured;
+  if (!s.configured) { line.textContent = ""; line.classList.remove("bad"); return; }
   b.disabled = s.running;
   b.textContent = s.running ? "Checking…" : "Check for new jobs";
   line.classList.toggle("bad", !s.running && !!s.last && !s.ok);
@@ -591,7 +686,6 @@ async function loadIngest(wasRunning = false) {
   else if (wasRunning) { lastJobsText = ""; refreshJobs(); }
 }
 if (EDITABLE) {
-  $("ingestBtn").hidden = false;
   $("ingestBtn").onclick = async () => {
     try { await post("/api/ingest"); } catch (e) { $("ingestLine").textContent = e.message; }
     loadIngest(true);
@@ -599,6 +693,56 @@ if (EDITABLE) {
   loadIngest();
 }
 $("sortSel").onchange = renderList;
+
+// Which jobs the board can edit, whether alerts are set up, and which computer this is.
+async function loadInfo() {
+  if (!EDITABLE) return;
+  try { info = await (await fetch("/api/info", { cache: "no-store" })).json(); } catch { return; }
+  render();
+}
+
+// Add job: paste a link, Look up fills what it can, you check it and save.
+let lookedUp = null;
+function openAdd() {
+  $("addForm").reset(); lookedUp = null;
+  ["aLookupLine", "aEvidence", "aStatus"].forEach((id) => $(id).textContent = "");
+  $("addDlg").showModal(); $("aUrl").focus();
+}
+$("aLookup").onclick = async () => {
+  const url = $("aUrl").value.trim();
+  if (!url) { $("aLookupLine").textContent = "Paste the link first."; return; }
+  $("aLookup").disabled = true; $("aLookupLine").textContent = "Reading the posting…";
+  try {
+    const r = await post("/api/lookup", { url }); lookedUp = r;
+    if (r.url) $("aUrl").value = r.url;
+    for (const [k, id] of [["role", "aRole"], ["company", "aCompany"], ["location", "aLocation"]]) if (r[k] && !$(id).value) $(id).value = r[k];
+    const warn = [];
+    if (r.closed) warn.push("The page says this posting is closed.");
+    if (r.not_permanent) warn.push(`It may be contract or part-time (${r.not_permanent}).`);
+    $("aLookupLine").textContent = r.error || (warn.join(" ") || "Filled in what the page says. Check it.");
+    $("aLookupLine").classList.toggle("bad", !!(r.error || warn.length));
+    if (r.remote && r.remote !== "unknown") {
+      $("aEvidence").textContent = `The posting suggests ${r.remote === "yes" ? "fully remote" : "not fully remote"}: “${r.evidence}”. Pick an answer above once you've checked.`;
+    } else if (!r.error) $("aEvidence").textContent = "The posting doesn't say whether it's remote.";
+  } catch (e) { $("aLookupLine").textContent = e.message; }
+  $("aLookup").disabled = false;
+};
+$("aCancel").onclick = () => $("addDlg").close();
+$("addForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  $("aSave").disabled = true; $("aStatus").textContent = "Saving…";
+  try {
+    const remote = $("aRemote").value;
+    await post("/api/add", { url: $("aUrl").value.trim(), role: $("aRole").value, company: $("aCompany").value,
+      location: $("aLocation").value, pay: $("aPay").value, remote, notes: $("aNotes").value,
+      evidence: lookedUp && lookedUp.remote === remote ? lookedUp.evidence : "" });
+    $("addDlg").close();
+    lastJobsText = ""; await refreshJobs();
+    toast(`Added: ${$("aRole").value}` + (remote === "yes" ? "" : " (hidden until you confirm it's fully remote)"));
+  } catch (e) { $("aStatus").textContent = e.message; }
+  $("aSave").disabled = false;
+};
+if (EDITABLE) { $("addBtn").hidden = false; $("addBtn").onclick = openAdd; loadInfo(); }
 $("updated").textContent = window.JOBS_UPDATED ? "Last updated " + window.JOBS_UPDATED : "";
 render();
 loadPackets();

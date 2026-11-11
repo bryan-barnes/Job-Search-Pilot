@@ -17,9 +17,11 @@ the rest are kept but hidden.
 Each run also re-checks LinkedIn jobs you haven't applied to yet (new, found, applying) and marks
 any whose posting has closed as "expired", which removes them from the board.
 
+If LinkedIn alerts aren't set up (no worker_url in config.json), it only does that re-check.
+
 The email text is untrusted. It is only parsed into fields and passed to the agent as data.
-The Worker access key is read from the macOS Keychain (service "job-alerts-worker") or from
-config.json's worker_token (the Windows way).
+The Worker access key is read from config.json's worker_token or, on a Mac, the Keychain
+(service "job-alerts-worker").
 
 This pipeline never logs in to LinkedIn: it reads your alert emails and public job pages only.
 See docs/linkedin-alerts.md for why.
@@ -28,13 +30,9 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import date
 from email import message_from_bytes, policy
 from pathlib import Path
@@ -54,17 +52,9 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def worker_get(base: str, path: str, token: str, params: dict | None = None) -> bytes:
-    url = base + path + ("?" + urllib.parse.urlencode(params) if params else "")
-    req = urllib.request.Request(
-        url, headers={"Authorization": f"Bearer {token}", "User-Agent": "job-alerts-ingest/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read()
-
-
 def load_state() -> dict:
     if STATE.exists():
-        return json.loads(STATE.read_text())
+        return json.loads(STATE.read_text(encoding="utf-8"))
     return {"messages": [], "jobs": {}}
 
 
@@ -116,7 +106,7 @@ def norm(s: str) -> str:
 
 
 def existing_tracker() -> tuple[set[str], set[str]]:
-    text = JOBS.read_text()
+    text = JOBS.read_text(encoding="utf-8")
     ids = set(re.findall(r"jobs/view/(\d+)", text))
     pairs = {norm(co) + "|" + norm(role) for co, role in
              re.findall(r'company:\s*"([^"]*)",\s*\n\s*role:\s*"([^"]*)"', text)}
@@ -140,12 +130,12 @@ def agent_score(cfg: dict, jobs: list[dict], master: Path) -> dict[str, dict]:
         "Reply with a single line of JSON only, no prose: "
         '{"results": [{"id": "<jobId>", "fit": 3, "why": "...", "about": "..."}]}\n\n'
         f"Listings (id | title | company | location):\n{listing}\n\n"
-        "=== MASTER RESUME ===\n" + master.read_text()
+        "=== MASTER RESUME ===\n" + master.read_text(encoding="utf-8-sig")
     )
     with tempfile.TemporaryDirectory(prefix="score-") as tmp:
         tmp = Path(tmp)
         agent.run_prompt(cfg, prompt, cwd=tmp, log=tmp / "score.log")
-        text = (tmp / "score.log").read_text(errors="replace")
+        text = (tmp / "score.log").read_text(encoding="utf-8", errors="replace")
     out = {}
     for r in agent.extract_json_results(text) or []:
         try:
@@ -160,22 +150,12 @@ def agent_score(cfg: dict, jobs: list[dict], master: Path) -> dict[str, dict]:
     return out
 
 
-def js_str(s: str) -> str:
-    return json.dumps(s, ensure_ascii=False)
-
-
-def slug(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:60]
-
-
 def add_to_tracker(jobs: list[dict], today: str, scored_off: str) -> None:
-    text = JOBS.read_text()
-    existing_ids = set(re.findall(r'\bid:\s*"([^"]+)"', text))
-    entries = []
+    """Add the jobs to jobs.js. Call with jobsfile.locked() held."""
+    text = jobsfile.read()
     for j in jobs:
-        base = slug(f'{j["company"]} {j["title"]}') or f'linkedin-{j["jobId"]}'
-        jid = base if base not in existing_ids else f'{base}-{j["jobId"]}'
-        existing_ids.add(jid)
+        base = jobsfile.slug(f'{j["company"]} {j["title"]}') or f'linkedin-{j["jobId"]}'
+        jid = jobsfile.unique_id(text, base, j["jobId"])
         if "fit" in j:
             notes = (f"Agent pre-score from the title only: {j['why']} "
                      f"Company (model's guess, check it): {j['about']}.")
@@ -186,22 +166,16 @@ def add_to_tracker(jobs: list[dict], today: str, scored_off: str) -> None:
                   "no": f' Not fully remote per the posting: "{j.get("evidence", "")}".',
                   }.get(remote, " The posting doesn't say whether it's remote; check before applying.")
         notes += " Pay and requirements are not in the alert email."
-        lines = [f"    {k}: {js_str(v)}," for k, v in [
-            ("id", jid), ("company", j["company"]), ("role", j["title"]),
-            ("location", j["location"]), ("url", j["url"]), ("source", j["source"]),
-            ("status", "new"), ("remote", remote),
-        ]]
-        if "fit" in j:
-            lines.append(f'    fit: {j["fit"]},')
-        lines.append(f"    notes: {js_str(notes)},")
-        lines.append(f"    added: {js_str(today)},")
-        entries.append("  {\n" + "\n".join(lines) + "\n  },\n")
-    idx = text.rstrip().rfind("];")
-    if idx == -1:
-        sys.exit("Could not find the end of window.JOBS in jobs.js; nothing written.")
-    text = text[:idx] + "".join(entries) + text[idx:]
-    text = re.sub(r'window\.JOBS_UPDATED = "[^"]*";', f'window.JOBS_UPDATED = "{today}";', text)
-    JOBS.write_text(text)
+        try:
+            text = jobsfile.add_job(text, {
+                "id": jid, "company": j["company"], "role": j["title"],
+                "location": j["location"], "url": j["url"], "source": j["source"],
+                "status": "new", "remote": remote, "fit": j.get("fit"),
+                "notes": notes, "added": today,
+            })
+        except ValueError as exc:
+            sys.exit(f"{exc}; nothing written.")
+    jobsfile.write(jobsfile.touch(text, today))
 
 
 def recheck_open_jobs(today: str, dry: bool) -> None:
@@ -247,14 +221,18 @@ def recheck_open_jobs(today: str, dry: bool) -> None:
 
 
 def main() -> None:
+    jobsfile.utf8_stdio()
     dry = "--dry-run" in sys.argv
     today = date.today().isoformat()
     cfg = agent.load_config()
-    worker = cfg.get("worker_url", "")
-    if not worker or "YOUR-" in worker.upper():
-        sys.exit("config.json: set worker_url to your job-alerts Worker (see docs/linkedin-alerts.md).")
+    if not agent.alerts_configured(cfg):
+        log("LinkedIn alerts aren't set up (no worker_url in config.json), so there's no email "
+            "to read. Re-checking your open jobs for closed postings only.")
+        recheck_open_jobs(today, dry=dry)
+        log("Alerts not set up: re-checked open jobs only.")
+        return
     token = agent.worker_token(cfg)
-    master = HOME / cfg.get("resume_master", "resume/master.md")
+    master = HOME / Path(cfg.get("resume_master") or "resume/master.md").expanduser()
     if not master.is_file():
         sys.exit(f"No master resume at {master} (config.json: resume_master).")
     scoring = bool(cfg.get("scoring", {}).get("enabled", False))
@@ -262,13 +240,13 @@ def main() -> None:
     state = load_state()
     done = set(state["messages"])
 
-    listing = json.loads(worker_get(worker, "/list", token))
+    listing = json.loads(agent.worker_get(cfg, "/list", token=token))
     new_msgs = [m for m in listing if m["key"] not in done and "linkedin" in m.get("from", "")]
 
     found: dict[str, dict] = {}
     notices = unparsed = 0
     for m in new_msgs:
-        subject, text = plain_text(worker_get(worker, "/msg", token, {"key": m["key"]}))
+        subject, text = plain_text(agent.worker_get(cfg, "/msg", {"key": m["key"]}, token=token))
         if "has been created" in subject.lower():
             notices += 1  # sample jobs in these ignore the alert's filters
             continue
@@ -307,6 +285,10 @@ def main() -> None:
             continue
         j["remote"] = info["remote"] if info else "unknown"
         j["evidence"] = info["evidence"] if info else ""
+        if j["remote"] == "unknown" and re.search(r"\bremote\b", j["location"], re.I) \
+                and not re.search(r"\bhybrid\b|\bon-?site\b", j["location"], re.I):
+            j["remote"], j["evidence"] = "yes", f'the alert email lists the location as "{j["location"]}"'
+
         open_jobs.append(j)
     fresh = open_jobs
 
@@ -316,13 +298,13 @@ def main() -> None:
         log("Scoring skipped (manual runner can't run headless); adding jobs unscored.")
     elif scoring:
         scored_off = "scoring failed this run"
-        cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
+        cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
         to_score = [j for j in fresh if j["jobId"] not in cache]
         if to_score:
             try:
                 for i in range(0, len(to_score), 10):
                     cache.update(agent_score(cfg, to_score[i:i + 10], master))
-                CACHE.write_text(json.dumps(cache, indent=1))
+                CACHE.write_text(json.dumps(cache, indent=1), encoding="utf-8")
             except Exception as exc:  # noqa: BLE001
                 log(f"Scoring failed ({exc}); adding the rest unscored.")
         for j in fresh:
@@ -350,7 +332,7 @@ def main() -> None:
     for j in temp:
         state["jobs"][j["jobId"]] = f"{today} skipped: contract, temporary, or part-time"
     state["messages"] = sorted(done | {m["key"] for m in new_msgs})
-    STATE.write_text(json.dumps(state, indent=1))
+    STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
     remote_n = sum(j["remote"] == "yes" for j in fresh)
     log(f"Added {len(fresh)} job(s) to jobs.js as New ({remote_n} fully remote and shown on the "
         f"board; {len(fresh) - remote_n} hidden). Skipped {len(expired)} closed posting(s) and "

@@ -1,11 +1,23 @@
-# Personal data and local state: never commit these
+# Your own files: created from templates/ on first run, never committed
+/about-me.md
+/applicant-profile.md
+/canned-answers.md
+/experience-bank.md
+/inbox.md
+/jobs.js
+/resume/master.md
+/bases/*/
 config.json
 applications/
 strengths/
+
+# Local state and logs
 alerts-state.json
 alerts-scores.json
 ingest.log
+board.log
 .jobs.lock
+.jobs-*.js
 resume/*.pdf
 resume/*.docx
 tools/node_modules/

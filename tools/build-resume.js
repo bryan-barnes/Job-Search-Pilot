@@ -1,15 +1,16 @@
 // Build <First-Last>-Resume.docx and .html from the master resume (resume/master.md).
 // The base name is derived from the resume's "# Name" line, e.g. "Alex Q. Doe" -> Alex-Q-Doe-Resume.
-// Usage: node build-resume.js <master-resume.md> <outDir>
-// Then print the HTML to PDF with headless Chrome (see tools/rebuild-resume.sh).
+// Usage: node build-resume.js <master-resume.md> <outDir> [file-stem]
+// (tools/documents.py always passes the file stem, so Python and Node agree on file names.)
+// Then print the HTML to PDF with headless Chrome (tools/documents.py does this).
 const fs = require('fs');
 const path = require('path');
 const {
   Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, LevelFormat,
 } = require('docx');
 
-const [, , src, outDir] = process.argv;
-const raw = fs.readFileSync(src, 'utf8');
+const [, , src, outDir, stemArg] = process.argv;
+const raw = fs.readFileSync(src, 'utf8').replace(/^\uFEFF/, ''); // Notepad may add a BOM
 
 const FONT = 'Arial';
 const BODY = 19; // half-points (9.5pt)
@@ -44,7 +45,8 @@ kids.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 20 
   children: [new TextRun({ text: headline, font: FONT, size: 21 })] }));
 kids.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 },
   children: [new TextRun({ text: contact, font: FONT, size: 18 })] }));
-h.push(`<h1>${name}</h1><p class="headline">${headline}</p><p class="contact">${contact}</p>`);
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+h.push(`<h1>${esc(name)}</h1><p class="headline">${esc(headline)}</p><p class="contact">${esc(contact)}</p>`);
 
 for (let i = 4; i < lines.length; i++) {
   const l = lines[i];
@@ -93,7 +95,7 @@ const doc = new Document({
     margin: { top: 605, bottom: 605, left: 792, right: 792 } } }, children: kids }],
 });
 
-const base = path.join(outDir, name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + '-Resume');
+const base = path.join(outDir, (stemArg || name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Your-Name') + '-Resume');
 Packer.toBuffer(doc).then((buf) => fs.writeFileSync(`${base}.docx`, buf));
 
 const css = `@page{size:Letter;margin:0.42in 0.55in}
@@ -105,4 +107,4 @@ h2{font-size:10.5pt;border-bottom:0.75pt solid #444;margin:7pt 0 3pt;padding-bot
 h3{font-size:10pt;margin:5pt 0 0}
 p{margin:0 0 1.5pt}.org{margin-bottom:1.5pt}
 ul{margin:0 0 1pt;padding-left:13.5pt}li{margin:0 0 1pt}`;
-fs.writeFileSync(`${base}.html`, `<!doctype html><html><head><meta charset="utf-8"><title>${name} Resume</title><style>${css}</style></head><body>${h.join('\n')}</body></html>`);
+fs.writeFileSync(`${base}.html`, `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)} Resume</title><style>${css}</style></head><body>${h.join('\n')}</body></html>`);

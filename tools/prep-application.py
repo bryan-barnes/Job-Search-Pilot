@@ -2,7 +2,7 @@
 """Build an application packet for one job in jobs.js.
 
 Usage:  python3 -I tools/prep-application.py <job-id>              (full prep)
-        python3 -I tools/prep-application.py <job-id> --build-only (manual mode: build the PDFs)
+        python3 -I tools/prep-application.py <job-id> --build-only (build the PDFs from the .md files)
         (the board's "Prep application" button runs the first form for you)
 
 Makes applications/<job-id>/ with:
@@ -15,9 +15,9 @@ Makes applications/<job-id>/ with:
   apply-in-chrome.md         the prompt to paste into Claude in Chrome to fill the form
   status.json                progress, read by the board
 
-In "manual" mode the agent step writes RUN-THIS.md (the prompt to paste into any AI assistant)
-and stops. When the four .md files are in the folder, the board's "Build documents" button
-runs this script with --build-only to make the PDFs and the Chrome prompt.
+In "manual" mode the agent step writes RUN-THIS.md, one self-contained prompt with every source
+file inside it, and stops. You paste it into any AI assistant and paste the reply back into the
+board, which saves the four .md files and runs this script with --build-only.
 
 Nothing is submitted anywhere; you review the packet and apply yourself.
 """
@@ -26,47 +26,34 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
-import time
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent  # noqa: E402
+import documents  # noqa: E402
 import jobsfile  # noqa: E402
 import linkedin_check  # noqa: E402
 
 HOME = jobsfile.HOME
 TOOLS = HOME / "tools"
 FIELDS = ["company", "role", "pay", "location", "remote", "url", "source", "fit", "blocker", "notes"]
-if sys.platform == "win32":
-    CHROME_DEFAULT = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-else:
-    CHROME_DEFAULT = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+WRITES = agent.WRITES
 
 
 def load_cfg() -> dict:
     cfg = agent.load_config()
-    cfg.setdefault("chrome_path", CHROME_DEFAULT)
-    cfg["_master"] = HOME / cfg.get("resume_master", "resume/master.md")
+    cfg["_master"] = HOME / Path(cfg.get("resume_master") or "resume/master.md").expanduser()
     if not cfg["_master"].is_file():
         sys.exit(f"No master resume at {cfg['_master']} (config.json: resume_master).")
     return cfg
 
 
-def doc_stem(name: str) -> str:
-    """'Alex Q. Doe' -> 'Alex-Q-Doe'; the builders make <stem>-Resume and <stem>-Cover-Letter."""
-    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")
-
-
-def master_name(cfg: dict) -> str:
-    for line in cfg["_master"].read_text().splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return "Your-Name"
+def read(p: Path) -> str:
+    return p.read_text(encoding="utf-8-sig")
 
 
 class Packet:
@@ -78,7 +65,7 @@ class Packet:
     def status(self, state: str, step: str, **extra) -> None:
         data = {"state": state, "step": step, "updated": datetime.now().isoformat(timespec="seconds"),
                 **extra}
-        (self.dir / "status.json").write_text(json.dumps(data, indent=1))
+        (self.dir / "status.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         print(f"[{state}] {step}", flush=True)
 
 
@@ -129,54 +116,102 @@ def save_posting(p: Packet, job: dict, cfg: dict) -> None:
                            f"({linkedin_check.not_permanent(job.get('role', ''), desc)[:100]}). "
                            "This search is for full-time permanent roles only; mark it Not interested.")
     if len(desc) < 400:
-        extra += "- The saved description looks too short. The page may need a browser; try WebFetch.\n"
+        extra += ("- The saved description looks too short. The page may need a browser. Paste the "
+                  "job description into your-notes.md in this folder, or below, and run Prep again.\n")
     head = "\n".join(f"- {k}: {job[k]}" for k in FIELDS if job.get(k) not in (None, ""))
     (p.dir / "posting.md").write_text(
         f"# {job.get('role')} at {job.get('company')}\n\nSaved {date.today().isoformat()}.\n\n"
-        f"## From the tracker\n{head}\n{extra}\n## Job description\n\n{desc or '(not fetched)'}\n")
+        f"## From the tracker\n{head}\n{extra}\n## Job description\n\n{desc or '(not fetched)'}\n",
+        encoding="utf-8")
+
+
+# ---------- the agent step ----------
+
+MANUAL_HEADER = """\
+You're helping me apply for a job, working in this chat without access to my files.
+Everything the instructions below tell you to read is included at the end of this message,
+each file starting with a line like `@@@ FILE: posting.md @@@`.
+
+How to answer: where the instructions say to write a file, put it in your reply instead. Start
+each file on its own line with its marker, exactly like this, in this order:
+
+@@@ FILE: resume.md @@@
+@@@ FILE: cover-letter.md @@@
+@@@ FILE: answers.md @@@
+@@@ FILE: fit-check.md @@@
+
+Under each marker, write that file's contents as plain Markdown (not inside a code block).
+Write nothing before the first marker. If you can't do the job (for example, there's no job
+description below), reply only with `@@@ FILE: NEEDS-POSTING.md @@@` and say what's missing.
+
+I'll paste your whole reply back into my job board, which splits it into the four files.
+
+===== INSTRUCTIONS =====
+
+"""
+
+
+def master_ref(p: Packet, cfg: dict) -> str:
+    """How the prompt names the master resume: relative to the packet folder when it's inside
+    this folder (../../resume/master.md), else its full path (resume_master can point anywhere)."""
+    try:
+        return "../../" + cfg["_master"].resolve().relative_to(HOME.resolve()).as_posix()
+    except ValueError:
+        return str(cfg["_master"])
+
+
+def source_files(p: Packet, cfg: dict) -> list[tuple[str, Path]]:
+    """(name as the prompt refers to it, path) for every file the agent should read."""
+    out = [("posting.md", p.dir / "posting.md")]
+    if (p.dir / "your-notes.md").exists():
+        out.append(("your-notes.md", p.dir / "your-notes.md"))
+    for name in ("about-me.md", "canned-answers.md", "experience-bank.md", "applicant-profile.md"):
+        out.append((f"../../{name}", HOME / name))
+    out.append((master_ref(p, cfg), cfg["_master"]))
+    out.append(("../../bases/README.md", HOME / "bases" / "README.md"))
+    for base in sorted(d for d in (HOME / "bases").iterdir() if d.is_dir()):
+        for f in ("about.md", "resume.md", "cover-letter.md"):
+            if (base / f).is_file():
+                out.append((f"../../bases/{base.name}/{f}", base / f))
+    return [(n, f) for n, f in out if f.is_file()]
+
+
+def agent_prompt(p: Packet, cfg: dict) -> str:
+    base = read(TOOLS / "application-prompt.md") + (
+        f"\n\nThe master resume is at: {master_ref(p, cfg)}\n")
+    if agent.runner_name(cfg) != "manual":
+        return base + "Start now. When you're done, reply with one line: the files you wrote."
+    files = "\n\n".join(f"@@@ FILE: {name} @@@\n\n{read(path).strip()}"
+                        for name, path in source_files(p, cfg))
+    return MANUAL_HEADER + base + "\n===== THE FILES =====\n\n" + files + "\n"
 
 
 def run_agent(p: Packet, cfg: dict, prompt: str | None = None, log_name: str = "agent.log") -> str:
     """Run the prompt through the configured agent. Returns the runner used ('manual' writes
     RUN-THIS.md and runs nothing)."""
-    prompt = prompt or (TOOLS / "application-prompt.md").read_text() + (
-        f"\n\nThe master resume is at: {cfg['_master']}\n"
-        "Start now. When you're done, reply with one line: the files you wrote.")
+    prompt = prompt or agent_prompt(p, cfg)
     runner = agent.run_prompt(cfg, prompt, cwd=p.dir, log=p.dir / log_name)
     if runner != "manual":
         if (p.dir / "NEEDS-POSTING.md").exists():
             raise RuntimeError("Couldn't get the job description; see NEEDS-POSTING.md")
-        missing = [f for f in ("resume.md", "cover-letter.md", "answers.md", "fit-check.md")
-                   if not (p.dir / f).exists()]
+        missing = [f for f in WRITES if not (p.dir / f).exists()]
         if missing:
             raise RuntimeError("The agent didn't write: " + ", ".join(missing))
     return runner
 
 
-def to_pdf(html: Path, pdf: Path, chrome: str) -> int:
-    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
-                    f"--print-to-pdf={pdf}", f"file://{html}"], capture_output=True, timeout=120)
-    out = subprocess.run(["pdfinfo", str(pdf)], capture_output=True, text=True).stdout
-    m = re.search(r"Pages:\s+(\d+)", out)
-    return int(m.group(1)) if m else 0
-
+# ---------- building the documents ----------
 
 def build_documents(p: Packet, cfg: dict) -> dict:
-    stem = doc_stem(master_name(cfg))
+    stem = documents.file_stem(cfg, cfg["_master"])
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        subprocess.run(["node", str(TOOLS / "build-resume.js"), str(p.dir / "resume.md"), str(tmp)],
-                       check=True, cwd=TOOLS)
-        subprocess.run(["node", str(TOOLS / "build-letter.js"), str(p.dir / "cover-letter.md"),
-                        str(cfg["_master"]), str(tmp)], check=True, cwd=TOOLS)
-        time.sleep(1)  # docx is written asynchronously
         pages = {
-            "resume": to_pdf(tmp / f"{stem}-Resume.html", tmp / f"{stem}-Resume.pdf", cfg["chrome_path"]),
-            "letter": to_pdf(tmp / f"{stem}-Cover-Letter.html", tmp / f"{stem}-Cover-Letter.pdf", cfg["chrome_path"]),
+            "resume": documents.build_resume(p.dir / "resume.md", tmp, cfg["chrome_path"], stem),
+            "letter": documents.build_letter(p.dir / "cover-letter.md", cfg["_master"], tmp,
+                                             cfg["chrome_path"], stem),
         }
-        for f in tmp.glob("*.pdf"):
-            shutil.copy(f, p.dir / f.name)
-        for f in tmp.glob("*.docx"):
+        for f in list(tmp.glob("*.pdf")) + list(tmp.glob("*.docx")):
             shutil.copy(f, p.dir / f.name)
     return pages
 
@@ -208,11 +243,11 @@ def build_one_page(p: Packet, cfg: dict, tries: int = 2) -> dict:
 
 
 def chrome_prompt(p: Packet, job: dict, cfg: dict) -> None:
-    """One self-contained prompt for Claude in Chrome, which can't read files on this Mac."""
-    stem = doc_stem(master_name(cfg))
-    letter = (p.dir / "cover-letter.md").read_text().strip()
-    answers = (p.dir / "answers.md").read_text().strip()
-    profile = (HOME / "applicant-profile.md").read_text().strip()
+    """One self-contained prompt for Claude in Chrome, which can't read files on this computer."""
+    stem = documents.file_stem(cfg, cfg["_master"])
+    letter = read(p.dir / "cover-letter.md").strip()
+    answers = read(p.dir / "answers.md").strip()
+    profile = read(HOME / "applicant-profile.md").strip()
     (p.dir / "apply-in-chrome.md").write_text(f"""Help me fill out a job application. Don't submit it: I'll review and click Submit myself.
 
 Job: {job.get('role')} at {job.get('company')}
@@ -239,51 +274,59 @@ Steps:
 ===== COVER LETTER =====
 
 {letter}
-""")
+""", encoding="utf-8")
 
 
-def update_tracker(job_id: str, cfg: dict, stem: str) -> None:
+def update_tracker(job_id: str, stem: str) -> None:
     def record(text):
         text = jobsfile.set_field(text, job_id, "resume", f"applications/{job_id}/{stem}-Resume.pdf")
         prev = jobsfile.get(text, job_id, "next") or ""
         nxt = "Review the packet (fit-check.md first), then apply with Claude in Chrome"
-        if prev and not prev.startswith("Review the packet"):
+        if prev and not prev.startswith("Review the packet") and not prev.startswith("Follow the packet"):
             nxt += f" (earlier next step: {prev})"
         text = jobsfile.set_field(text, job_id, "next", nxt)
         return jobsfile.touch(text, date.today().isoformat())
     jobsfile.update(record)
 
 
+def finish_packet(p: Packet, job: dict, cfg: dict, job_id: str, stem: str) -> None:
+    """Build the documents and the Chrome prompt, note the page check, and mark it ready."""
+    p.status("running", "Building PDF and Word files")
+    pages = build_one_page(p, cfg)
+    chrome_prompt(p, job, cfg)
+    warn = [f"{k} is {n} pages" for k, n in pages.items() if n != 1]
+    fit = p.dir / "fit-check.md"
+    old = read(fit) if fit.exists() else ""
+    old = old.split("\n\n## Build check (script)")[0].rstrip()
+    fit.write_text(old + "\n\n## Build check (script)\n\n"
+                   + "\n".join(f"- {k.title()} PDF: {n} page{'s' if n != 1 else ''}"
+                               + ("" if n == 1 else ". Too long: trim resume.md or cover-letter.md, "
+                                                    "then click Rebuild documents.")
+                               for k, n in pages.items()) + "\n", encoding="utf-8")
+    update_tracker(job_id, stem)
+    p.status("ready", "Packet ready" + (f" (check: {', '.join(warn)})" if warn else ""), pages=pages)
+
+
 def main() -> None:
+    jobsfile.utf8_stdio()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     build_only = "--build-only" in sys.argv
     if len(args) != 1:
         sys.exit(__doc__)
     job_id = args[0]
+    cfg = load_cfg()
     if job_id not in jobsfile.ids(jobsfile.read()):
         sys.exit(f"No job {job_id!r} in jobs.js")
-    cfg = load_cfg()
     p = Packet(job_id)
-    stem = doc_stem(master_name(cfg))
+    stem = documents.file_stem(cfg, cfg["_master"])
     try:
         job = job_fields(job_id)
         if build_only:
-            missing = [n for n in ("resume.md", "cover-letter.md", "answers.md")
-                       if not (p.dir / n).is_file()]
+            missing = [n for n in WRITES[:3] if not (p.dir / n).is_file()]
             if missing:
                 raise RuntimeError("Missing " + ", ".join(missing) +
-                                   "; follow RUN-THIS.md and get the agent to write them first.")
-            p.status("running", "Building PDF and Word files")
-            pages = build_one_page(p, cfg)
-            chrome_prompt(p, job, cfg)
-            warn = [f"{k} is {n} pages" for k, n in pages.items() if n != 1]
-            with open(p.dir / "fit-check.md", "a") as fc:
-                fc.write("\n\n## Build check (script)\n\n"
-                         + "\n".join(f"- {k.title()} PDF: {n} page{'s' if n != 1 else ''}"
-                                     + ("" if n == 1 else ". Too long: trim resume.md or cover-letter.md, then Build documents.")
-                                     for k, n in pages.items()) + "\n")
-            update_tracker(job_id, cfg, stem)
-            p.status("ready", "Packet ready" + (f" (check: {', '.join(warn)})" if warn else ""), pages=pages)
+                                   "; paste the AI's reply into the board (or write them) first.")
+            finish_packet(p, job, cfg, job_id, stem)
             return
         # Keep the last version of anything we're about to regenerate (you may have edited it).
         old = [f for f in p.dir.iterdir() if f.is_file() and f.name not in ("status.json", "prep.log")]
@@ -292,34 +335,25 @@ def main() -> None:
             keep.mkdir(parents=True)
             for f in old:
                 shutil.copy2(f, keep / f.name)
+            for name in WRITES + ("NEEDS-POSTING.md",):
+                (p.dir / name).unlink(missing_ok=True)
         p.status("running", "Saving the posting")
         save_posting(p, job, cfg)
         p.status("running", "Writing resume and cover letter (a few minutes)")
         runner = run_agent(p, cfg)
         if runner == "manual":
-            p.status("manual", "Manual mode: read RUN-THIS.md and paste it into your AI assistant. "
-                               "When resume.md, cover-letter.md, and answers.md are in this folder, "
-                               "click Build documents.")
+            p.status("manual", "Manual mode: copy the prompt, paste it into your AI assistant, then "
+                               "paste its whole reply back here.")
 
             def record(text):
                 prev = jobsfile.get(text, job_id, "next") or ""
-                nxt = "Follow the packet's RUN-THIS.md, then click Build documents"
+                nxt = "Follow the packet's manual steps on the board (copy prompt, paste reply)"
                 if prev and not prev.startswith("Follow the packet"):
                     nxt += f" (earlier next step: {prev})"
                 return jobsfile.set_field(text, job_id, "next", nxt)
             jobsfile.update(record)
             return
-        p.status("running", "Building PDF and Word files")
-        pages = build_one_page(p, cfg)
-        chrome_prompt(p, job, cfg)
-        warn = [f"{k} is {n} pages" for k, n in pages.items() if n != 1]
-        with open(p.dir / "fit-check.md", "a") as fc:
-            fc.write("\n\n## Build check (script)\n\n"
-                     + "\n".join(f"- {k.title()} PDF: {n} page{'s' if n != 1 else ''}"
-                                 + ("" if n == 1 else ". Too long: trim resume.md or cover-letter.md, then Rebuild.")
-                                 for k, n in pages.items()) + "\n")
-        update_tracker(job_id, cfg, stem)
-        p.status("ready", "Packet ready" + (f" (check: {', '.join(warn)})" if warn else ""), pages=pages)
+        finish_packet(p, job, cfg, job_id, stem)
     except Exception as exc:  # noqa: BLE001
         p.status("failed", str(exc)[:300])
         sys.exit(1)

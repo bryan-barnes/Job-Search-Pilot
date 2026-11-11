@@ -1,14 +1,15 @@
 {
-  "worker_url": "https://YOUR-WORKER.workers.dev",
-  "worker_token": null,
-  "resume_master": "resume/master.md",
   "agent": {
     "runner": "manual",
     "model": null
   },
+  "permanent_only": true,
   "scoring": {
     "enabled": false
   },
-  "permanent_only": true,
-  "chrome_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  "chrome_path": null,
+  "resume_master": "resume/master.md",
+  "document_name": null,
+  "worker_url": "https://YOUR-WORKER.workers.dev",
+  "worker_token": null
 }

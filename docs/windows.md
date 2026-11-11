@@ -1,63 +1,45 @@
 # Windows
 
-Everything in this repo runs on Windows. The setup wizard
-(`python tools\setup-wizard.py`) knows about Windows and gives you Windows
-instructions at every step; this page is the reference for the differences.
+Everything runs on Windows 10 and 11. The setup wizard gives you Windows instructions at every
+step; this page is the reference. (Every change is tested on Windows by the smoke test in
+`tests/smoke.py`, which GitHub runs on Windows and Mac.)
 
 ## What you need
 
 | Tool | Why | Install |
 |---|---|---|
-| Python 3.10+ | All the scripts | `winget install Python.Python.3.12` (check "Add to PATH" in the installer) |
-| Node.js 18+ | Builds the .docx files | `winget install OpenJS.NodeJS.LTS` |
+| Python 3.9+ | All the scripts | `winget install Python.Python.3.12`, or the installer from python.org (tick "Add python.exe to PATH") |
+| Node.js 18+ | Builds the Word files | `winget install OpenJS.NodeJS.LTS`, or the LTS installer from nodejs.org |
 | Google Chrome | Prints the PDFs | google.com/chrome, normal installer |
-| poppler (pdfinfo) | Counts the PDF pages | `winget install oschwartz10612.Poppler` |
 
-After installing, open a **new** terminal window (so the PATH picks up the new tools) and
-run `python tools\setup-wizard.py`. The wizard checks each one and tells you if anything
-is still missing.
-
-## The differences from Mac
-
-| Mac | Windows |
-|---|---|
-| `Open Job Board.command` (double-click) | `Open Job Board.bat` (double-click) |
-| `zsh setup.sh` quick check | not needed - the wizard does everything |
-| Worker key in the Keychain (service `job-alerts-worker`) | Worker key in `config.json` under `worker_token` (the wizard stores it; the file is gitignored, so it's safe) |
-| `tools/rebuild-resume.sh` to rebuild the master resume's PDF | the wizard's step 5 does the same test build; or run the two commands below |
-| `open <file>` from the board's buttons | `os.startfile` (the board handles this for you) |
-
-The Chrome path is `C:\Program Files\Google\Chrome\Application\chrome.exe`; the wizard
-detects it and writes it to `config.json`. If you installed Chrome for one user only, it
-lives in `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe` - put that path in
-`config.json` under `chrome_path`.
-
-## Rebuilding the master resume's PDF by hand (Windows)
+After installing, open a **new** terminal window (so it sees the new programs), go to the
+folder, and run:
 
 ```
-cd tools
-npm install                      (one time)
-python -I ..\tools\setup-wizard.py   step 5 does the build for you
+py tools\setup-wizard.py
 ```
 
-Or without the wizard, the two steps it runs are:
+`py` is the Python launcher that comes with Python. If `py` isn't found, use `python` instead.
+If `python` opens the Microsoft Store, Python isn't installed yet (that's a Windows shortcut,
+not Python): install it as above.
 
-```
-node tools\build-resume.js resume\master.md <some-folder>
-"<chrome-path>" --headless=new --disable-gpu --no-pdf-header-footer ^
-  --print-to-pdf=<some-folder>\Your-Name-Resume.pdf ^
-  file:///<some-folder>/Your-Name-Resume.html
-pdfinfo <some-folder>\Your-Name-Resume.pdf
-```
+## Day to day
 
-(Replace `Your-Name` with whatever the first line of `resume/master.md` says, with
-non-alphanumeric runs turned into hyphens.)
+- Double-click **`Open Job Board.bat`** to open the board. It starts the board server in a
+  small minimized window called "Job board server"; closing that window stops the board.
+- Your Worker key (if you set up LinkedIn alerts) is stored in `config.json` under
+  `worker_token`. That file is never committed. (On a Mac it goes in the Keychain instead.)
+- To rebuild your master resume's PDF after editing it: `py tools\rebuild-resume.py`.
+- Chrome is found automatically in Program Files or your user's AppData. If yours is
+  elsewhere, put the full path to `chrome.exe` in `config.json` under `chrome_path`.
 
 ## Notes
 
-- The board server listens only on `127.0.0.1:8765`, so it's not reachable from other
-  machines. Windows Defender won't ask about it because it never accepts outside
-  connections.
-- `applications/`, `config.json`, and the resume PDFs are gitignored exactly as on Mac.
-- If a terminal command complains about "execution policy" for a `.ps1` script, you don't
-  need one - everything here is Python, `.bat`, or `.js`.
+- The board server listens only on `127.0.0.1:8765`, so it isn't reachable from other
+  computers, and Windows Firewall has nothing to ask about.
+- Files are read and written as UTF-8, so names like "Zoë" or "Núñez" work everywhere. If you
+  edit your files in Notepad, that's fine (including Notepad's "UTF-8 with BOM").
+- If PowerShell complains about "execution policy", you don't need a `.ps1` script:
+  everything here is Python, `.bat`, or `.js`.
+- If you use the `claude` or `opencode` runner, install it so it's on your PATH (see
+  `docs/agents.md`); the board passes it the prompt safely on Windows.

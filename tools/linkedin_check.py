@@ -160,6 +160,56 @@ def other_site_closed(url: str) -> tuple[bool, str] | None:
     return (True, re.sub(r"\s+", " ", text[max(0, m.start() - 40):m.end() + 60]).strip()) if m else (False, "")
 
 
+def lookup(url: str) -> dict:
+    """Best-effort details for the board's Add job form, from a posting URL on any site:
+    {role, company, location, remote, evidence, closed, not_permanent, url}. Fields it can't
+    find are empty. Never raises for a page it can't read."""
+    m = re.search(r"linkedin\.com/(?:.*?/)?jobs/view/(?:[^/?#]*?-)?(\d{6,})", url) \
+        or re.search(r"[?&]currentJobId=(\d{6,})", url)
+    if m:
+        p = posting(m.group(1))
+        if not p:
+            return {"url": f"https://www.linkedin.com/jobs/view/{m.group(1)}/",
+                    "error": "LinkedIn didn't show the public page; fill in the details yourself."}
+        return {"url": f"https://www.linkedin.com/jobs/view/{m.group(1)}/", "role": p["title"],
+                "company": p["company"], "location": p["location"], "remote": p["remote"],
+                "evidence": p["evidence"], "closed": p["closed"], "not_permanent": p["not_permanent"]}
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en-US"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            page = resp.read(1_500_000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return {"url": url, "closed": exc.code in (404, 410),
+                "error": f"The page answered {exc.code}; fill in the details yourself."}
+    except Exception as exc:  # noqa: BLE001
+        return {"url": url, "error": f"Couldn't read the page ({exc}); fill in the details yourself."}
+
+    def meta(prop: str) -> str:
+        mm = re.search(r'<meta[^>]+(?:property|name)=["\']' + prop + r'["\'][^>]*content=["\']([^"\']*)', page, re.I) \
+            or re.search(r'<meta[^>]+content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']' + prop, page, re.I)
+        return _text(mm.group(1)) if mm else ""
+    title = meta("og:title")
+    if not title:
+        t = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
+        title = _text(t.group(1)) if t else ""
+    company = meta("og:site_name")
+    # "Director of Digital - Acme" / "Job Application for X at Acme" are common title shapes.
+    at = re.match(r"(?:Job Application for )?(.+?) at (.+?)(?: [|\-–] .*)?$", title)
+    if at:
+        title, company = at.group(1), company or at.group(2)
+    else:
+        parts = re.split(r" [|\-–] ", title)
+        if len(parts) > 1:
+            title, company = parts[0], company or parts[1]
+    body = re.sub(r"<(script|style|nav|footer)\b.*?</\1>", " ", page, flags=re.S | re.I)
+    text = _text(body)
+    remote, evidence = classify(title, text)
+    closed = REMOVED.search(text)
+    return {"url": url, "role": title[:200], "company": company[:200], "location": "",
+            "remote": remote, "evidence": evidence[:200], "closed": bool(closed),
+            "not_permanent": not_permanent(title, text)}
+
+
 def check(job_id: str, timeout: int = 20) -> dict | None:
     """Closed / remote verdict only (used by ingest-alerts.py)."""
     p = posting(job_id, timeout)

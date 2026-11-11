@@ -6,7 +6,7 @@ How job alert emails get from LinkedIn to the board, and how to set it up.
 LinkedIn (your saved alert)
    |  email to your inbox
    v
-Gmail filter  ->  forwards to  alerts@yourdomain.com  (an address you own)
+Gmail filter  ->  forwards to  alerts@yourdomain.com  (an address on your own domain)
    v
 Cloudflare Email Worker  "job-alerts"  (stores only LinkedIn mail, 30 days, read needs a token)
    v
@@ -41,71 +41,101 @@ The only signed-in LinkedIn in the whole workflow is the manual, human-paced par
 reading the workplace badge and you clicking Apply, in your own browser. That's normal use of
 the site, not automation.
 
-## 1. The LinkedIn alert
+## Setting it up
 
-In LinkedIn, save a job alert with your search (title, location "Remote", etc.). It emails
-your inbox as `Your job alert for <search>`. You'll also get one "Your alert has been created"
-email with sample jobs; the pipeline skips that notice.
+The easiest way is the setup wizard's step 7 (`python3 tools/setup-wizard.py`, or
+`py tools\setup-wizard.py` on Windows): it walks you through each part below, stores your key,
+tests the Worker, and reads Gmail's confirmation code for you. This section is the same thing
+written out.
 
-## 2. The forwarding filter
+**You need:** a domain name of your own whose DNS is on Cloudflare (the free plan is fine), so
+Cloudflare can receive mail for an address like `alerts@yourdomain.com`. Gmail is assumed for
+your inbox; any mail provider that can forward by rule works the same way.
 
-In Gmail, create a filter that matches the alert sender (e.g. `from:jobs-noreply@linkedin.com`
-and the created-alert sender `jobalerts-noreply@linkedin.com`) and adds the action **Forward
-to: alerts@yourdomain.com**. The address must be one you own and control.
+The order matters: Gmail won't forward to an address until you confirm a code it sends there,
+and that email arrives at the Worker. So the Worker comes first.
 
-The Worker only accepts mail from `@linkedin.com` addresses plus Gmail's one-time forwarding
-confirmation; everything else is rejected and never stored. So the filter only has to forward
-the LinkedIn mail, but any other mail sent to that address bounces.
-
-## 3. The Cloudflare Email Worker
+### 1. The Cloudflare Email Worker
 
 The code is in `tools/job-alerts-worker/worker.js`. It stores each accepted email in a KV
 namespace for 30 days and serves two endpoints, both requiring a bearer token:
 
-- `GET /list` — the stored emails (key, sender, subject)
-- `GET /msg?key=...` — one email's raw text
+- `GET /list`: the stored emails (key, sender, subject)
+- `GET /msg?key=...`: one email's raw text
 
-To deploy it:
+In the Cloudflare dashboard:
 
-1. In the Cloudflare dashboard, create a KV namespace (any name; the binding in the code is
-   `ALERTS`).
-2. Create a Worker and paste in `worker.js`.
-3. Bind the KV namespace to the Worker as `ALERTS`.
-4. Add the secret `ALERTS_TOKEN` (any long random string; the Worker won't serve mail without
-   the matching `Authorization: Bearer <token>` header).
-5. Add an **Email route** for `alerts@yourdomain.com` pointing at the Worker. (Your domain has
-   to be on Cloudflare, or the address has to be set up for Email Routing.)
+1. **Storage & Databases → KV → Create** a namespace (any name, e.g. `job-alerts`).
+2. **Workers & Pages → Create → Worker**, name it `job-alerts`, deploy, then **Edit code**:
+   replace everything with `worker.js` and deploy again.
+3. The Worker → **Settings → Bindings → Add → KV namespace**: variable name `ALERTS`, the
+   namespace from step 1.
+4. The Worker → **Settings → Variables and Secrets → Add**, type **Secret**, name
+   `ALERTS_TOKEN`, value: a long random string (e.g. from
+   `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`). The Worker won't serve
+   mail without the matching `Authorization: Bearer <token>` header.
+5. Your domain → **Email → Email Routing** (turn it on if asked) → **Routing rules → Create
+   address**: e.g. `alerts@yourdomain.com`, action **Send to a Worker** → `job-alerts`.
 
-When it's live, test it:
+The Worker accepts mail only from `@linkedin.com` addresses and Gmail's forwarding
+confirmation (`forwarding-noreply@google.com`); everything else is rejected and never stored.
+
+### 2. Connect this computer to the Worker
+
+Put the Worker's address in `config.json` as `worker_url` (e.g.
+`https://job-alerts.yourname.workers.dev`), and its key:
+
+- **Mac:** in the Keychain, service `job-alerts-worker`:
+  `security add-generic-password -a "$USER" -s job-alerts-worker -w "<token>"`
+  (or put it in `config.json` as `worker_token`).
+- **Windows:** in `config.json` as `worker_token`. The file is never committed.
+
+Then check it:
 
 ```
-curl https://your-worker.yourname.workers.dev/list -H "Authorization: Bearer <token>"
+python3 tools/alerts_worker.py          (Windows: py tools\alerts_worker.py)
 ```
 
-That returns `[]` until the first alert email arrives.
+It says whether the Worker answers with your key and how many emails it holds.
 
-## 4. Your side of it
+### 3. Gmail forwarding, and the confirmation code
 
-1. Put the Worker key in the macOS Keychain, service name `job-alerts-worker`:
+1. In Gmail: the gear → **See all settings → Forwarding and POP/IMAP → Add a forwarding
+   address** → your alerts address → Next → Proceed. Gmail sends a confirmation code to that
+   address, which means to the Worker.
+2. Run `python3 tools/alerts_worker.py` again. It prints the **confirmation code** and the
+   confirmation link from that email. (It can take a minute to arrive.)
+3. Back in Gmail, on the same settings page, enter the code and click **Verify**. Leave
+   "Forward a copy of incoming mail" **off**: the filter below forwards only LinkedIn's mail.
 
-   ```
-   security add-generic-password -a "$(whoami)" -s job-alerts-worker -w "<token>"
-   ```
+### 4. The Gmail filter
 
-   (or `security add-generic-password -s job-alerts-worker` and type it). `ingest-alerts.py`
-   reads it with `security find-generic-password -s job-alerts-worker -w`; it exits with a
-   message if it's missing.
-2. Set `worker_url` in `config.json` to the Worker's URL, e.g.
-   `https://your-worker.yourname.workers.dev`.
-3. Test the whole path without changing anything:
+In Gmail's search box, paste:
 
-   ```
-   python3 -I tools/ingest-alerts.py --dry-run
-   ```
+```
+from:(jobalerts-noreply@linkedin.com OR jobs-noreply@linkedin.com)
+```
 
-   It lists the new emails it parsed, the jobs it would add (with remote verdicts), and any
-   open jobs it would mark expired. A real run does the same and writes to `jobs.js` and
-   `alerts-state.json`.
+Click the filter icon at the right of the search box → **Create filter** → tick **Forward it
+to** and choose your alerts address → **Create filter**.
+
+### 5. The LinkedIn alert
+
+On LinkedIn, search Jobs for what you want (title, and Remote under the location filters),
+then turn on **Set alert** with email delivery. LinkedIn emails your inbox as `Your job alert
+for <search>`, and the filter forwards it. You'll also get one "Your alert has been created"
+email with sample jobs; the pipeline skips that notice.
+
+### 6. Test the whole path
+
+```
+python3 -I tools/ingest-alerts.py --dry-run
+```
+
+It lists the new emails it parsed, the jobs it would add (with remote verdicts), and any open
+jobs it would mark expired, and changes nothing. 0 new emails is normal until LinkedIn sends
+its first alert (usually within a day). After that the board checks every 3 hours from 8am to
+10pm, and **Check for new jobs** checks now.
 
 ## How the emails get parsed
 
