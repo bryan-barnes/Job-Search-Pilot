@@ -248,7 +248,7 @@ Steps:
 3. Resume first. If the form has a resume upload or "autofill from resume", stop right away and ask me to attach {stem}-Resume.pdf before you fill anything, because the parser overwrites fields. Cover letter: if it's a text box, paste the COVER LETTER below; if it's an upload, ask me to attach {stem}-Cover-Letter.pdf at the same time as the resume. Both files (and .docx versions) are in my packet folder: {p.dir}
 4. After the resume is parsed, check the fields it filled (name, contact, work history, education) against MY PROFILE and fix parsing errors.
 5. Fill the rest using MY PROFILE and DRAFT ANSWERS below. Use the draft answers' wording for free-text questions, trimmed to fit any character limit.
-6. Don't stop for each unknown question. Keep going, skip anything not covered (and anything marked "[you: fill]"), then ask me all of them together in one list. Don't guess on salary, work authorization, references, legal agreements, or demographic questions.
+6. Don't stop for each unknown question. Keep going, skip anything not covered (and anything marked "[you: fill]" or "[<name>: fill]"), then ask me all of them together in one list. Don't guess on salary, work authorization, references, legal agreements, or demographic questions.
 7. Required consent and attestation checkboxes (privacy, AI evaluation, recording, background checks, "all of this is true"): tick them. Leave optional marketing or talent-community boxes unticked.
 8. Stop on the final review page. Tell me what you filled in, what you skipped, and which checkboxes you ticked.
 
