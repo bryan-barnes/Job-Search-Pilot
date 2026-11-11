@@ -16,7 +16,7 @@ jobs:
           - os: macos-latest
             python: "3.12"
           - os: ubuntu-latest
-            python: "3.9"
+            python: "3.x"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
