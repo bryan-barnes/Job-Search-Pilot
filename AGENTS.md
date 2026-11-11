@@ -37,8 +37,9 @@ The tools create any missing file from `templates/` the first time they run.
   Board.bat` (Windows), which start `tools/board-server.py` (http://127.0.0.1:8765, this
   computer only). Its buttons save to `jobs.js`: **Add job**, Interested (new → found), Not
   interested (→ passed), Posting expired (→ expired), Mark applied, the next stage (Screen,
-  Interview, Offer), Not selected (→ rejected), Not fully remote / Confirmed remote, and the
-  three 1–5 scores. An optional reason is added to `notes`. **Check for new jobs** runs
+  Interview, Offer), Not selected (→ rejected), Not fully remote / Confirmed remote, the
+  three 1–5 scores, and **Score fit (N)**, which runs `tools/fitscore.py` to have the configured
+  agent score Fit for every listed, unscored job from its posting (the reason goes in `notes`). An optional reason is added to `notes`. **Check for new jobs** runs
   `tools/ingest-alerts.py` now when LinkedIn alerts are set up; the board server also runs it
   every 3 hours between 8am and 10pm (output in `ingest.log`). Opened as a plain file, the
   board is read-only.

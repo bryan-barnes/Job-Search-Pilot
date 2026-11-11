@@ -9,6 +9,7 @@
 /bases/*/
 config.json
 applications/
+scoring/
 strengths/
 
 # Local state and logs

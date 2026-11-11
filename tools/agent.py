@@ -139,9 +139,16 @@ def worker_get(cfg: dict, path: str, params: dict | None = None, token: str | No
 
 def executable(cfg: dict) -> str | None:
     runner = runner_name(cfg)
-    if runner in ("opencode", "claude"):
-        return shutil.which(runner)
-    return None
+    if runner not in ("opencode", "claude"):
+        return None
+    found = shutil.which(runner)
+    if found:
+        return found
+    # A board started by double-click may not have the shell's full PATH; try the usual homes.
+    names = [runner + ext for ext in ((".cmd", ".exe") if sys.platform == "win32" else ("",))]
+    dirs = [Path.home() / ".local/bin", Path.home() / ".opencode/bin", Path("/opt/homebrew/bin"),
+            Path("/usr/local/bin"), Path(os.environ.get("APPDATA", "")) / "npm"]
+    return next((str(d / n) for d in dirs for n in names if (d / n).is_file()), None)
 
 
 def check(cfg: dict) -> str | None:

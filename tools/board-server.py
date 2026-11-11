@@ -19,6 +19,9 @@ POST /api/reply   {"id", "text"}  manual mode: save the AI's pasted reply as the
 GET  /api/packets         status.json of every packet, plus the files it contains
 POST /api/open    {"id", "file"?}  open a packet folder or file on this computer
 GET  /api/packet/<id>/<file>       read a packet's text file (e.g. apply-in-chrome.md)
+POST /api/score   {"ids": [...]}  score Fit 1-5 for these jobs from their postings (fitscore.py)
+GET  /api/score           the scoring run's progress
+POST /api/score-reply {"text"}  manual mode: apply the AI's pasted scores
 POST /api/ingest          check for new jobs now (tools/ingest-alerts.py, in the background)
 GET  /api/ingest          whether that's running, and the last run's result
 
@@ -41,6 +44,7 @@ from threading import Lock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent  # noqa: E402
+import fitscore  # noqa: E402
 import jobsfile  # noqa: E402
 import linkedin_check  # noqa: E402
 
@@ -66,6 +70,7 @@ AUTO_HOURS = range(8, 22)     # local time window for automatic runs
 AUTO_EVERY = 3 * 3600         # seconds between automatic runs
 ingest_proc: subprocess.Popen | None = None
 ingest_lock = Lock()
+score_proc: subprocess.Popen | None = None
 PREP_PARALLEL = 3
 prep_queue: list[str] = []
 
@@ -120,6 +125,14 @@ def auto_ingest() -> None:
         time.sleep(600)
 
 
+def score_status() -> dict:
+    data = fitscore.read_status()
+    busy = score_proc is not None and score_proc.poll() is None
+    if data.get("state") == "running" and not busy:
+        data = {**data, "state": "failed", "step": "Stopped unexpectedly; see scoring/score.log"}
+    return {**data, "busy": busy}
+
+
 def valid_id(job_id) -> bool:
     return isinstance(job_id, str) and re.fullmatch(r"[a-z0-9-]{1,120}", job_id) is not None
 
@@ -166,6 +179,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, packets())
         if path == "/api/ingest":
             return self._json(200, ingest_status())
+        if path == "/api/score":
+            return self._json(200, score_status())
+        if path == "/api/score-prompt" and (HOME / "scoring" / "RUN-THIS.md").is_file():
+            return self._send(200, (HOME / "scoring" / "RUN-THIS.md").read_bytes(), "text/plain")
         m = re.fullmatch(r"/api/packet/([a-z0-9-]+)/([\w.-]+\.md)", path)
         if m and (APPS / m.group(1) / m.group(2)).is_file():
             return self._send(200, (APPS / m.group(1) / m.group(2)).read_bytes(), "text/plain")
@@ -195,6 +212,7 @@ class Handler(BaseHTTPRequestHandler):
         route = {"/api/update": self._update, "/api/undo": self._undo, "/api/prep": self._prep,
                  "/api/prep-batch": self._prep_batch, "/api/build": self._build,
                  "/api/reply": self._reply, "/api/add": self._add,
+                 "/api/score": self._score, "/api/score-reply": self._score_reply,
                  "/api/open": self._open, "/api/ingest": self._ingest}.get(self.path)
         if not route:
             return self._json(404, {"error": "Not found"})
@@ -324,6 +342,27 @@ class Handler(BaseHTTPRequestHandler):
             queued.append(job_id)
         undo_stack.clear()
         self._json(200, {"ok": True, "queued": queued, "skipped": skipped})
+
+    def _score(self, body: dict):
+        global score_proc
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 200 or not all(valid_id(i) for i in ids):
+            return self._json(400, {"error": "Send 1 to 200 job ids"})
+        if score_proc is not None and score_proc.poll() is None:
+            return self._json(409, {"error": "Already scoring; wait for it to finish"})
+        fitscore.status("running", "Starting", done=0, total=len(ids))
+        with open(HOME / "scoring" / "score.log", "w", encoding="utf-8") as log:
+            score_proc = subprocess.Popen(PY + [str(HOME / "tools/fitscore.py"), *ids],
+                                          cwd=HOME, stdout=log, stderr=subprocess.STDOUT,
+                                          start_new_session=True)
+        self._json(200, {"ok": True})
+
+    def _score_reply(self, body: dict):
+        n, err = fitscore.finish_manual(str(body.get("text") or ""))
+        if err:
+            return self._json(400, {"error": err})
+        undo_stack.clear()
+        self._json(200, {"ok": True, "scored": n})
 
     def _ingest(self, _body):
         if not start_ingest():

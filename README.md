@@ -14,7 +14,9 @@ repo holds only the tools and templates, and your own files are never committed 
 - **The board**: a local web page listing your jobs in a pipeline (New → Found → Applying →
   Applied → Screen → Interview → Offer). **Add job** takes a posting's link and fills in the
   details. Score each job 1–5 on fit, company, and how much you'd like it, and move it along
-  with one click. Fully remote jobs only; the rest are kept but hidden.
+  with one click. **Score fit** has your AI read every unscored posting and score Fit against
+  your resume in one go, with a one-line reason. Fully remote jobs only; the rest are kept but
+  hidden.
 - **Application packets**: for each job you want, a folder with the saved posting, a one-page
   resume variant, a cover letter, draft form answers, an honest fit check, and a prompt for
   Claude in Chrome that fills the application form and stops before Submit.
@@ -103,6 +105,7 @@ right-click the file → Open → Open.
 | `inbox.md` | Links for an AI agent working in this folder to add for you |
 | `bases/<name>/` | Optional extra resume bases (see `bases/README.md`) |
 | `applications/<job-id>/` | One folder per job you prep |
+| `scoring/` | The last Score fit run's progress and prompt |
 | `config.json` | Your settings |
 
 **The tools** (shared, updated with `git pull`):
@@ -120,6 +123,7 @@ right-click the file → Open → Open.
 | `tools/agent.py` | Settings, your files, and the three AI runners |
 | `tools/documents.py`, `build-resume.js`, `build-letter.js` | Markdown → Word and PDF |
 | `tools/jobsfile.py` | Safe, atomic edits to `jobs.js` |
+| `tools/fitscore.py` | Score fit: Fit 1–5 for many jobs at once, from their postings |
 | `tools/ingest-alerts.py`, `linkedin_check.py` | The LinkedIn alert feed and the posting checks |
 | `tools/alerts_worker.py` | Check your alerts Worker; shows Gmail's forwarding confirmation code |
 | `tools/job-alerts-worker/worker.js` | The Cloudflare Email Worker that stores the alert emails |

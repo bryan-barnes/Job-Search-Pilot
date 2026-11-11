@@ -148,7 +148,10 @@ textarea { min-height: 84px; resize: vertical; }
   <div class="tools">
     <span class="tools-left"><span id="countLine">Loading jobs…</span> <button type="button" class="linkbtn" id="hiddenBtn" hidden></button>
       <button type="button" class="btn small" id="checkBtn" hidden></button>
-      <button type="button" class="btn small" id="prepBtn" hidden></button></span>
+      <button type="button" class="btn small" id="prepBtn" hidden></button>
+      <button type="button" class="btn small" id="scoreBtn" hidden title="Ask your AI to score Fit 1-5 from each posting"></button>
+      <button type="button" class="btn small" id="scorePasteBtn" hidden>Paste AI scores</button>
+      <span class="score-line" id="scoreLine" role="status"></span></span>
     <label for="sortSel">Sort
       <select id="sortSel">
         <option value="score">Highest score</option>
@@ -171,6 +174,23 @@ textarea { min-height: 84px; resize: vertical; }
 
   <p class="note">Only fully remote jobs are listed. Jobs whose posting closed before you applied are removed from the board (the board re-checks open postings every few hours). Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. <span id="alertsNote" hidden>New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. </span>Click a job to score it, move it along, or mark it Not interested, Posting expired, or Not selected. For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
 </div>
+
+<dialog id="scoreDlg" aria-labelledby="scoreTitle">
+  <div class="ed">
+    <h3 id="scoreTitle">Score fit with your AI</h3>
+    <p class="status" id="sLine"></p>
+    <ol class="steps">
+      <li>Click Copy the prompt. It has your resume, about-me.md, and each posting inside it.</li>
+      <li>Paste it into a new chat in Claude, ChatGPT, or any AI assistant, and send it.</li>
+      <li>Copy its whole reply (a block starting with {"results") and paste it below.</li>
+    </ol>
+    <textarea id="sReply" aria-label="The AI's reply" placeholder='Paste the reply here. It looks like {"results": [{"id": "...", "fit": 4, "why": "..."}]}'></textarea>
+    <div class="actions"><span class="status" id="sStatus" role="status"></span><div>
+      <button type="button" class="btn" id="sClose">Close</button>
+      <button type="button" class="btn" id="sCopy">Copy the prompt</button>
+      <button type="button" class="btn primary" id="sSave">Save scores</button></div></div>
+  </div>
+</dialog>
 
 <dialog id="addDlg" aria-labelledby="addTitle">
   <form class="ed" id="addForm" method="dialog">
@@ -271,6 +291,9 @@ textarea { min-height: 84px; resize: vertical; }
   .reply textarea { width: 100%; min-height: 120px; font: 0.82rem/1.4 var(--mono); }
   .steps { margin: 0; padding-left: 20px; font-size: 0.88rem; display: grid; gap: 4px; }
   .confirm code { font-family: var(--mono); font-size: 0.8rem; }
+  .score-line { font-size: 0.82rem; color: var(--muted); }
+  .score-line.bad { color: var(--bad); }
+  #sReply { width: 100%; min-height: 120px; font: 0.82rem/1.4 var(--mono); }
 </style>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <script src="jobs.js"></script>
@@ -287,6 +310,7 @@ let filter = "active";
 let showHidden = false;
 let packets = {};
 let lastOpened = null;
+let scoring = false; // a Score fit run is going
 let info = { editable: null, alerts: false, runner: "manual", windows: false }; // from /api/info
 const prepPicked = new Set(); // jobs ticked in Prep packets mode
 const checkedNow = new Map(); // jobs marked during this Check remote round stay on screen until "Done checking"
@@ -301,6 +325,8 @@ const inStage = (j, k) => k === "active" ? ACTIVE.has(j.status || "found") : (j.
 const $ = (id) => document.getElementById(id);
 const today = () => new Date(new Date().toDateString());
 const days = (iso) => iso ? Math.floor((today() - new Date(iso + "T00:00:00")) / 864e5) : null;
+// Jobs the Score fit button covers: listed, not applied yet, no Fit score.
+const scoreReady = (j) => visible(j) && NOT_APPLIED.has(j.status || "found") && !j.fit && editable(j);
 const total = (j) => (j.fit || 0) + (j.co || 0) + (j.like || 0);
 const rated = (j) => [j.fit, j.co, j.like].filter(Boolean).length;
 const editable = (j) => !info.editable || info.editable.includes(j.id);
@@ -426,6 +452,9 @@ function renderList() {
   const ready = jobs.filter(prepReady).length;
   $("prepBtn").hidden = !EDITABLE || prepping || checking || !ready;
   $("prepBtn").textContent = `Prep packets (${ready})`;
+  const toScore = jobs.filter(scoreReady).length;
+  $("scoreBtn").hidden = !EDITABLE || prepping || checking || !toScore || scoring;
+  $("scoreBtn").textContent = `Score fit (${toScore})`;
   renderPrepBar(rows);
   if (!rows.length) {
     const empty = el("div", "empty", checking ? "All checked. Nice." : prepping ? "No confirmed remote jobs are waiting for a packet." : shown.length ? "No jobs at this stage." : "No jobs yet.");
@@ -693,6 +722,53 @@ if (EDITABLE) {
   loadIngest();
 }
 $("sortSel").onchange = renderList;
+
+// Score fit: the AI scores Fit 1-5 for every listed, unscored job from its posting.
+let scoreTimer;
+function showScore(s) {
+  const line = $("scoreLine");
+  scoring = !!s.busy;
+  line.classList.toggle("bad", s.state === "failed");
+  line.textContent = s.busy ? `Scoring fit: ${s.step}…` : s.state === "failed" ? `Scoring stopped: ${s.step}` : "";
+  $("scorePasteBtn").hidden = s.state !== "manual" || s.busy;
+  $("scorePasteBtn").onclick = () => openScoreDlg(s);
+  if (s.state === "manual" && !$("scoreDlg").open && s.prompted !== true) openScoreDlg(s);
+  renderList();
+}
+async function loadScore(watch = false) {
+  if (!EDITABLE) return;
+  let s; try { s = await (await fetch("/api/score", { cache: "no-store" })).json(); } catch { return; }
+  const wasScoring = scoring;
+  if (!watch && s.state === "manual") s.prompted = true; // don't pop the dialog on page load
+  showScore(s);
+  clearTimeout(scoreTimer);
+  if (s.busy) scoreTimer = setTimeout(() => loadScore(true), 3000);
+  else if (wasScoring || watch) {
+    if (s.state === "done") { toast(s.step, false); lastJobsText = ""; refreshJobs(); }
+  }
+}
+function openScoreDlg(s) {
+  $("sLine").textContent = s.step || ""; $("sReply").value = ""; $("sStatus").textContent = "";
+  $("scoreDlg").showModal();
+}
+$("scoreBtn").onclick = async () => {
+  const ids = jobs.filter(scoreReady).map((j) => j.id);
+  if (info.runner === "manual" && ids.length > 15 && !confirm(`Manual mode scores 15 at a time. Score the first 15 of ${ids.length} now?`)) return;
+  try { await post("/api/score", { ids }); scoring = true; $("scoreLine").textContent = "Scoring fit: starting…"; renderList(); loadScore(true); }
+  catch (e) { $("scoreLine").textContent = e.message; }
+};
+$("sClose").onclick = () => $("scoreDlg").close();
+$("sCopy").onclick = async () => {
+  try { const r = await fetch("/api/score-prompt"); if (!r.ok) throw new Error("no prompt waiting"); await navigator.clipboard.writeText(await r.text()); $("sCopy").textContent = "Copied"; }
+  catch (e) { $("sStatus").textContent = "Couldn't copy: " + e.message + ". Open scoring/RUN-THIS.md instead."; }
+};
+$("sSave").onclick = async () => {
+  if (!$("sReply").value.trim()) { $("sStatus").textContent = "Paste the reply first."; return; }
+  try { const r = await post("/api/score-reply", { text: $("sReply").value }); $("scoreDlg").close();
+    toast(`Scored ${r.scored} job${r.scored === 1 ? "" : "s"}`, false); lastJobsText = ""; refreshJobs(); loadScore(); }
+  catch (e) { $("sStatus").textContent = e.message; }
+};
+if (EDITABLE) loadScore();
 
 // Which jobs the board can edit, whether alerts are set up, and which computer this is.
 async function loadInfo() {

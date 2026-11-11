@@ -74,17 +74,6 @@ def job_fields(job_id: str) -> dict:
     return {k: jobsfile.get(text, job_id, k) for k in FIELDS}
 
 
-def fetch_generic(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": linkedin_check.UA})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        page = resp.read().decode("utf-8", "replace")
-    page = re.sub(r"<(script|style|nav|header|footer)\b.*?</\1>", " ", page, flags=re.S | re.I)
-    page = re.sub(r"<br\s*/?>|</p>|</li>|</h\d>|</div>", "\n", page)
-    text = linkedin_check.html.unescape(re.sub(r"<[^>]+>", " ", page))
-    text = re.sub(r"[ \t]+", " ", text)
-    return re.sub(r"\n\s*\n+", "\n\n", text).strip()[:20000]
-
-
 def save_posting(p: Packet, job: dict, cfg: dict) -> None:
     url = job.get("url") or ""
     desc, extra = "", ""
@@ -107,7 +96,7 @@ def save_posting(p: Packet, job: dict, cfg: dict) -> None:
         if gone and gone[0]:
             raise RuntimeError(f"The posting page looks closed ({gone[1][:80]}). Mark it Posting expired.")
         try:
-            desc = fetch_generic(url)
+            desc = linkedin_check.page_text(url)
         except Exception as exc:  # noqa: BLE001
             extra = f"- Couldn't fetch the posting automatically: {exc}\n"
     if not m and cfg.get("permanent_only", True) \
@@ -163,8 +152,8 @@ def master_ref(p: Packet, cfg: dict) -> str:
 def source_files(p: Packet, cfg: dict) -> list[tuple[str, Path]]:
     """(name as the prompt refers to it, path) for every file the agent should read."""
     out = [("posting.md", p.dir / "posting.md")]
-    if (p.dir / "your-notes.md").exists():
-        out.append(("your-notes.md", p.dir / "your-notes.md"))
+    for notes in sorted(p.dir.glob("*notes.md")):  # your-notes.md, or any other *notes.md you wrote
+        out.append((notes.name, notes))
     for name in ("about-me.md", "canned-answers.md", "experience-bank.md", "applicant-profile.md"):
         out.append((f"../../{name}", HOME / name))
     out.append((master_ref(p, cfg), cfg["_master"]))

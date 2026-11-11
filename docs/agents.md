@@ -1,6 +1,6 @@
 # The agent runners
 
-The writing in this setup (application packets, optional alert pre-scoring, trim passes) is
+The writing in this setup (application packets, Score fit, optional alert pre-scoring, trim passes) is
 done by an AI agent through one of three runners, chosen in `config.json` under
 `agent.runner`. All three are driven by the same prompt files, so the output doesn't depend on
 which one you pick. `tools/agent.py` runs them; nothing in this repo talks to an LLM API

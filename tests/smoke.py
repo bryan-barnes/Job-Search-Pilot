@@ -118,8 +118,9 @@ def main() -> None:
                                       "pay": "$150K–$170K", "notes": "smoke test"})
         check(code == 200, f"added job {res}")
         jid = res["id"]
-        code, _ = call("/api/add", {"company": "Ácme Coöp", "role": ROLE, "remote": "yes"})
-        check(code == 200, "same company+role gets a second, unique id")
+        code, res2 = call("/api/add", {"company": "Ácme Coöp", "role": ROLE, "remote": "yes"})
+        check(code == 200 and res2["id"] != jid, "same company+role gets a second, unique id")
+        jid2 = res2["id"]
         code, res = call("/api/update", {"id": jid, "fit": 4, "co": 5, "like": 3})
         check(code == 200, "scores saved")
         code, _ = call("/api/update", {"id": jid, "fit": 9})
@@ -165,6 +166,29 @@ def main() -> None:
         check(letter.startswith("Dear Hiring Team") and "```" not in letter, "code fence stripped from the letter")
         code, txt = call(f"/api/packet/{jid}/apply-in-chrome.md")
         check(code == 200 and "Zoë" in txt.decode("utf-8"), "Chrome prompt served as UTF-8")
+
+        step("Score fit (manual mode)")
+        code, _ = call("/api/score", {"ids": [jid2]})
+        check(code == 200, "scoring started")
+        for _ in range(120):
+            s = call("/api/score")[1]
+            if not s.get("busy") and s.get("state") in ("manual", "failed", "done"):
+                break
+            time.sleep(1)
+        check(s.get("state") == "manual", f"scoring waits for the reply ({s.get('step')})")
+        code, sp = call("/api/score-prompt")
+        check(code == 200 and jid2 in sp.decode("utf-8") and "MASTER RESUME" in sp.decode("utf-8"),
+              "scoring prompt has the job and the resume")
+        code, res = call("/api/score-reply", {"text": "no json here"})
+        check(code == 400, "a reply without JSON is refused")
+        code, res = call("/api/score-reply", {"text": 'Sure!\n```json\n{"results": [{"id": "%s", "fit": 4, '
+                                                      '"why": "Strong CMS match; no budget ownership."}, '
+                                                      '{"id": "not-asked", "fit": 5}]}\n```' % jid2})
+        jobs = (root / "jobs.js").read_text(encoding="utf-8")
+        block = jobs[jobs.index(f'id: "{jid2}"'):]
+        block = block[:block.index("\n  },")]
+        check(code == 200 and res["scored"] == 1 and "fit: 4," in block and "no budget ownership" in block,
+              "fit and reason saved; ids it didn't ask about are ignored")
 
         step("Ingest without alerts set up")
         r = subprocess.run(PY + ["-I", str(root / "tools/ingest-alerts.py")], cwd=root,

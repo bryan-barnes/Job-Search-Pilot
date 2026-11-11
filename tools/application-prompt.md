@@ -4,8 +4,9 @@ before anything is sent.
 
 ## Read first
 1. `posting.md` in this folder: the job posting and the tracker's notes on it.
-   Also `your-notes.md` in this folder if it exists: the owner's own words about this job. They're
-   an approved source and they override the general defaults (for example, on salary).
+   Also `your-notes.md` (or any other file ending in `notes.md`) in this folder if it exists: the
+   owner's own words about this job. They're an approved source and they override the general
+   defaults (for example, on salary).
 2. `../../about-me.md`: who the owner is, what they want, their pay floor and salary rule, their
    voice, and their own rules.
 3. `../../canned-answers.md`: approved openers, proof blocks, closers, and answers.

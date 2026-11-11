@@ -160,6 +160,18 @@ def other_site_closed(url: str) -> tuple[bool, str] | None:
     return (True, re.sub(r"\s+", " ", text[max(0, m.start() - 40):m.end() + 60]).strip()) if m else (False, "")
 
 
+def page_text(url: str, limit: int = 20000) -> str:
+    """A non-LinkedIn posting page as plain text (scripts, styles, nav, and footers removed)."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en-US"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        page = resp.read(1_500_000).decode("utf-8", "replace")
+    page = re.sub(r"<(script|style|nav|header|footer)\b.*?</\1>", " ", page, flags=re.S | re.I)
+    page = re.sub(r"<br\s*/?>|</p>|</li>|</h\d>|</div>", "\n", page)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", page))
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n\n", text).strip()[:limit]
+
+
 def lookup(url: str) -> dict:
     """Best-effort details for the board's Add job form, from a posting URL on any site:
     {role, company, location, remote, evidence, closed, not_permanent, url}. Fields it can't
