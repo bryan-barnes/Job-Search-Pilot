@@ -44,7 +44,15 @@ def ensure_personal_files() -> list[str]:
     """Create any of your files that don't exist yet from templates/. Never overwrites.
     Returns the ones it created."""
     made = []
+    elsewhere = False  # resume_master points outside resume/master.md: don't make a placeholder
+    try:
+        master = json.loads(CONFIG.read_text(encoding="utf-8")).get("resume_master")
+        elsewhere = bool(master) and (HOME / Path(master).expanduser()).resolve() != (HOME / "resume/master.md").resolve()
+    except (OSError, ValueError):
+        pass
     for rel, tpl in PERSONAL.items():
+        if rel == "resume/master.md" and elsewhere:
+            continue
         dest = HOME / rel
         if not dest.exists():
             dest.parent.mkdir(parents=True, exist_ok=True)

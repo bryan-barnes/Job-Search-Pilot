@@ -490,8 +490,13 @@ def packets() -> dict:
         job_id = f.parent.name
         proc = running.get(job_id)
         if data.get("state") == "running" and (proc is None or proc.poll() is not None):
-            # The prep process ended without reporting (crash or server restart).
-            if proc is not None or data.get("step") in ("Starting", "Building documents"):
+            # The prep process ended without reporting (crash or server restart). A prep the
+            # board didn't start (it survived a restart) gets 45 minutes before it counts as dead.
+            try:
+                stale = time.time() - datetime.fromisoformat(data.get("updated", "")).timestamp() > 2700
+            except ValueError:
+                stale = True
+            if proc is not None or stale or data.get("step") in ("Starting", "Building documents"):
                 data = {**data, "state": "failed", "step": "Stopped unexpectedly; see prep.log or build.log"}
         if data.get("state") == "queued" and job_id not in prep_queue:
             data = {**data, "state": "failed", "step": "The board restarted before this one ran; click Try again"}
