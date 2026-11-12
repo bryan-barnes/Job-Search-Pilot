@@ -1,10 +1,12 @@
 """Settings (config.json), your files, the Worker, and the agent runners. Shared by every tool.
 
-Three runners (config.json -> agent.runner):
-  "opencode"  the OpenCode CLI, with whatever provider/model you've configured for it
-  "claude"    the Claude Code CLI, logged in with your Claude account (subscription works)
+Four runners (config.json -> agent.runner; the board's Settings screen changes it):
   "manual"    no CLI: writes the prompt to RUN-THIS.md so you can paste it into Claude,
               ChatGPT, or any other assistant, then paste the reply back into the board
+  "claude"    the Claude Code CLI, logged in with your Claude account (subscription works)
+  "codex"     OpenAI's Codex CLI, logged in with your ChatGPT account or an OpenAI API key
+  "opencode"  the OpenCode CLI, with whatever provider/model you've configured for it,
+              including local models
 
 The agent only ever runs with the packet folder (or a scratch dir) as its working directory,
 and the prompts tell it to work only there. Nothing here talks to an LLM API directly.
@@ -24,7 +26,19 @@ from pathlib import Path
 HOME = Path(__file__).resolve().parent.parent
 CONFIG = HOME / "config.json"
 TEMPLATES = HOME / "templates"
-RUNNERS = ("opencode", "claude", "manual")
+RUNNERS = ("manual", "claude", "codex", "opencode")
+CLI_RUNNERS = ("claude", "codex", "opencode")
+# Shown by the board's Settings screen and the setup wizard.
+RUNNER_INFO = {
+    "manual": ("Copy and paste", "Any AI chat: ChatGPT, Claude, Gemini, Copilot. The board gives you "
+               "a prompt to paste in, and you paste the reply back. Nothing to install."),
+    "claude": ("Claude Code", "Writes the packets for you with your Claude subscription. Needs the "
+               "Claude Code CLI."),
+    "codex": ("Codex (ChatGPT / GPT)", "Writes the packets for you with your ChatGPT subscription or "
+              "an OpenAI API key. Needs OpenAI's Codex CLI."),
+    "opencode": ("OpenCode", "Writes the packets for you with any provider you've set up in "
+                 "OpenCode, including a model running on your own computer."),
+}
 # The files the agent writes in a packet.
 WRITES = ("resume.md", "cover-letter.md", "answers.md", "fit-check.md")
 
@@ -83,6 +97,17 @@ def load_config() -> dict:
 
 def runner_name(cfg: dict) -> str:
     return cfg.get("agent", {}).get("runner", "manual")
+
+
+def model_name(cfg: dict) -> str | None:
+    return cfg.get("agent", {}).get("model") or None
+
+
+def save_config(cfg: dict) -> None:
+    """Write config.json atomically (the board server and the tools read it at any time)."""
+    tmp = CONFIG.with_name(CONFIG.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, CONFIG)
 
 
 # ---------- Chrome (prints the PDFs) ----------
@@ -147,7 +172,7 @@ def worker_get(cfg: dict, path: str, params: dict | None = None, token: str | No
 
 def executable(cfg: dict) -> str | None:
     runner = runner_name(cfg)
-    if runner not in ("opencode", "claude"):
+    if runner not in CLI_RUNNERS:
         return None
     found = shutil.which(runner)
     if found:
@@ -155,7 +180,8 @@ def executable(cfg: dict) -> str | None:
     # A board started by double-click may not have the shell's full PATH; try the usual homes.
     names = [runner + ext for ext in ((".cmd", ".exe") if sys.platform == "win32" else ("",))]
     dirs = [Path.home() / ".local/bin", Path.home() / ".opencode/bin", Path("/opt/homebrew/bin"),
-            Path("/usr/local/bin"), Path(os.environ.get("APPDATA", "")) / "npm"]
+            Path("/usr/local/bin"), Path.home() / ".npm-global/bin",
+            Path(os.environ.get("APPDATA", "")) / "npm"]
     return next((str(d / n) for d in dirs for n in names if (d / n).is_file()), None)
 
 
@@ -165,8 +191,9 @@ def check(cfg: dict) -> str | None:
     if runner == "manual":
         return None
     if not executable(cfg):
-        return (f"config.json says agent.runner is {runner!r}, but the {runner} CLI is not on "
-                f"your PATH. Install it (see docs/agents.md) or set agent.runner to \"manual\".")
+        return (f"Your settings say {RUNNER_INFO.get(runner, (runner,))[0]} writes your packets, but "
+                f"the {runner} CLI isn't installed on this computer (or isn't on your PATH). Install "
+                f"it (see docs/agents.md), or pick another AI under Settings on the board.")
     return None
 
 
@@ -187,27 +214,102 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
     # The prompt never goes on the command line: on Windows the CLIs are .cmd wrappers, and
     # cmd.exe cuts a multi-line argument off at the first line break.
     prompt_bytes = prompt.encode("utf-8")
+    model = model_name(cfg)
+    transcript = None
     if runner == "opencode":
         (cwd / "PROMPT.md").write_bytes(prompt_bytes)
         # An absolute path: opencode resolves --file from its own service, not from cwd.
         cmd = [exe, "run", "--auto", "--archived", "--file", str((cwd / "PROMPT.md").resolve())]
-        model = cfg.get("agent", {}).get("model")
         if model:
             cmd += ["--model", model]
         cmd.append("Follow the instructions in the attached file PROMPT.md.")
         stdin = b""
+    elif runner == "codex":
+        # workspace-write: it may edit files only in the working folder. Its transcript echoes the
+        # prompt (and the prompt's JSON examples), so the log gets only its final message (-o)
+        # and the transcript goes to a second file.
+        last = cwd / ".codex-last.txt"
+        last.unlink(missing_ok=True)
+        transcript = log.with_name(log.stem + "-codex" + log.suffix)
+        cmd = [exe, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--ephemeral",
+               "--color", "never", "--output-last-message", str(last.resolve())]
+        if model:
+            cmd += ["--model", model]
+        cmd.append("-")  # the prompt comes from stdin
+        stdin = prompt_bytes
     else:  # claude reads the prompt from stdin
         cmd = [exe, "-p", "--permission-mode", "acceptEdits"]
+        if model:
+            cmd += ["--model", model]
         stdin = prompt_bytes
     try:
-        with open(log, "wb") as f:
+        with open(transcript or log, "wb") as f:
             r = subprocess.run(cmd, cwd=cwd, input=stdin,
                                stdout=f, stderr=subprocess.STDOUT, timeout=timeout)
     finally:
         (cwd / "PROMPT.md").unlink(missing_ok=True)
+        if transcript:
+            last = cwd / ".codex-last.txt"
+            log.write_bytes(last.read_bytes() if last.is_file() else b"")
+            last.unlink(missing_ok=True)
     if r.returncode != 0:
-        raise RuntimeError(f"{runner} exited {r.returncode}; see {log.name}")
+        raise RuntimeError(f"{runner} exited {r.returncode}; see {(transcript or log).name}")
     return runner
+
+
+TEST_PROMPT = ("This is a connection test from Job Search Pilot. Don't read, write, or run anything. "
+               "Reply with the sum of 19 and 23, as digits only.")
+
+
+def test_runner(cfg: dict, timeout: int = 240) -> dict:
+    """Send a tiny prompt through the configured runner. Returns {ok, message, output}."""
+    import tempfile
+    import time
+    runner = runner_name(cfg)
+    if runner == "manual":
+        return {"ok": True, "message": "Copy and paste needs nothing installed.", "output": ""}
+    problem = check(cfg)
+    if problem:
+        return {"ok": False, "message": problem, "output": ""}
+    t0 = time.monotonic()
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "test.log"
+        try:
+            run_prompt(cfg, TEST_PROMPT, cwd=Path(tmp), log=log, timeout=timeout)
+            err = None
+        except subprocess.TimeoutExpired:
+            err = f"No answer after {timeout // 60} minutes."
+        except (RuntimeError, OSError) as exc:
+            err = str(exc)
+        answer = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        out = "".join(f.read_text(encoding="utf-8", errors="replace")
+                      for f in sorted(Path(tmp).glob("*.log")))
+    secs = round(time.monotonic() - t0)
+    out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out).strip()
+    if err:
+        if re.search(r"401|unauthori[sz]ed|not (logged|signed) in|log ?in|api key|credential", out, re.I):
+            err = (f"It isn't signed in yet. Open a terminal, run {runner} once, and sign in. "
+                   "Then test again.")
+        elif "exited" in err:
+            err = f"{RUNNER_INFO[runner][0]} ran but stopped with an error. See what it printed below."
+        return {"ok": False, "message": err, "output": out[-1500:]}
+    if not re.search(r"(?<!\d)42(?!\d)", answer):
+        return {"ok": False, "message": f"It ran ({secs}s) but didn't answer the test question. "
+                "Check that you're logged in and the model name is right.", "output": out[-1500:]}
+    return {"ok": True, "message": f"Working: it answered in {secs} seconds.", "output": out[-600:]}
+
+
+def opencode_models(cfg: dict) -> list[str]:
+    """The provider/model IDs OpenCode knows about (for the Settings screen), or []."""
+    exe = executable({"agent": {"runner": "opencode"}})
+    if not exe:
+        return []
+    try:
+        r = subprocess.run([exe, "models"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [ln.strip() for ln in r.stdout.splitlines() if re.fullmatch(r"[\w.@:-]+/[\w./@:-]+", ln.strip())]
 
 
 def extract_json_results(text: str) -> list[dict] | None:

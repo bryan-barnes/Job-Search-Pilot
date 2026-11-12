@@ -20,9 +20,10 @@ repo holds only the tools and templates, and your own files are never committed 
 - **Application packets**: for each job you want, a folder with the saved posting, a one-page
   resume variant, a cover letter, draft form answers, an honest fit check, and a prompt for
   Claude in Chrome that fills the application form and stops before Submit.
-- **Your choice of AI**: the writing is done by the Claude Code or OpenCode CLI, or, with no
-  install at all, by any AI chat: the board gives you one prompt to paste, and you paste the
-  reply back.
+- **Your choice of AI**: the writing is done by Claude Code, OpenAI's Codex (ChatGPT), or
+  OpenCode (any provider, including a model on your own computer), or, with no install at all,
+  by any AI chat: the board gives you one prompt to paste, and you paste the reply back. Switch
+  any time under **Settings** on the board, and test it there.
 - **LinkedIn alerts (optional)**: LinkedIn's alert emails are forwarded to an address you own,
   stored in your own Cloudflare account, and pulled onto the board. It never logs in to
   LinkedIn, on purpose, so your account is never at risk (see `docs/linkedin-alerts.md`).
@@ -77,12 +78,14 @@ right-click the file → Open → Open.
 
 ## Configuration
 
-`config.json` (yours, never committed; the wizard writes it from `config.example.json`):
+`config.json` (yours, never committed; the wizard writes it from `config.example.json`). Most of
+it can be changed under **Settings** on the board, which also shows which AI you're using and
+tests it:
 
 | Key | Meaning |
 |---|---|
-| `agent.runner` | `manual` (paste into any AI chat), `claude`, or `opencode`. See `docs/agents.md` |
-| `agent.model` | Model for the opencode runner; `null` = whatever OpenCode is set to |
+| `agent.runner` | `manual` (paste into any AI chat), `claude`, `codex`, or `opencode`. See `docs/agents.md` |
+| `agent.model` | The model for that runner; `null` = the CLI's own default |
 | `permanent_only` | Skip contract/temp/part-time postings (on by default) |
 | `scoring.enabled` | Give new alert jobs a 1–5 fit guess from the title (off by default) |
 | `chrome_path` | Chrome, which prints the PDFs. Found automatically on Mac and Windows |
@@ -120,7 +123,7 @@ right-click the file → Open → Open.
 | `tools/prep-application.py` | Builds one application packet |
 | `tools/rebuild-resume.py` | Rebuild your master resume's .docx/.pdf and check it's one page |
 | `tools/application-prompt.md` | The instructions the AI follows when writing a packet |
-| `tools/agent.py` | Settings, your files, and the three AI runners |
+| `tools/agent.py` | Settings, your files, and the AI runners |
 | `tools/documents.py`, `build-resume.js`, `build-letter.js` | Markdown → Word and PDF |
 | `tools/jobsfile.py` | Safe, atomic edits to `jobs.js` |
 | `tools/fitscore.py` | Score fit: Fit 1–5 for many jobs at once, from their postings |

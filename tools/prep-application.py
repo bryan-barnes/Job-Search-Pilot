@@ -8,7 +8,7 @@ Usage:  python3 -I tools/prep-application.py <job-id>              (full prep)
 Makes applications/<job-id>/ with:
   posting.md                 the job description, saved now in case the posting disappears
   resume.md, cover-letter.md, answers.md, fit-check.md   written by the configured agent
-                               (config.json -> agent.runner: opencode, claude, or manual),
+                               (config.json -> agent.runner: manual, claude, codex, or opencode),
                                following tools/application-prompt.md
   <First-Last>-Resume.pdf/.docx, <First-Last>-Cover-Letter.pdf/.docx
                              (the name comes from the master resume's first line)

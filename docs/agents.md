@@ -1,12 +1,13 @@
 # The agent runners
 
 The writing in this setup (application packets, Score fit, optional alert pre-scoring, trim passes) is
-done by an AI agent through one of three runners, chosen in `config.json` under
-`agent.runner`. All three are driven by the same prompt files, so the output doesn't depend on
-which one you pick. `tools/agent.py` runs them; nothing in this repo talks to an LLM API
+done by an AI agent through one of four runners. Pick one under **Settings** on the board (it
+saves `agent.runner` and `agent.model` in `config.json`), where **Test this AI** sends it a tiny
+question to check it's installed and signed in. All four are driven by the same prompt files.
+How good the packets are depends on the model behind the runner. `tools/agent.py` runs them; nothing in this repo talks to an LLM API
 directly.
 
-## The three runners
+## The four runners
 
 ### `manual`: no install, any AI chat (the default)
 
@@ -32,10 +33,24 @@ Good if you have a Claude subscription and want the packets written for you.
 
 - Install: see https://docs.claude.com/en/docs/claude-code (native installer, or
   `npm install -g @anthropic-ai/claude-code`), then run `claude` once to log in.
-- Config: `agent.runner: "claude"`. (`agent.model` is ignored.)
+- Config: `agent.runner: "claude"`, and `agent.model`: `null` for Claude Code's default, or an
+  alias such as `sonnet` or `opus`.
 - How it runs: `claude -p --permission-mode acceptEdits` with the packet folder as the working
   directory and the prompt on stdin. `acceptEdits` lets it write the packet files without
   asking. It has no browser.
+
+### `codex`: OpenAI's Codex CLI (ChatGPT / GPT models)
+
+For people who use ChatGPT: it signs in with your ChatGPT plan (or an OpenAI API key).
+
+- Install: `npm install -g @openai/codex` (needs Node.js, which you already have for the
+  documents), then run `codex` once in a terminal and sign in.
+- Config: `agent.runner: "codex"`, and `agent.model`: `null` for Codex's default, or a model
+  name your account offers.
+- How it runs: `codex exec --sandbox workspace-write --skip-git-repo-check --ephemeral -` with
+  the packet folder as the working directory and the prompt on stdin. `workspace-write` lets it
+  edit files only inside the packet folder. Its final message goes to the log the tools read;
+  the full transcript is saved next to it as `*-codex.log`.
 
 ### `opencode`: the OpenCode CLI
 

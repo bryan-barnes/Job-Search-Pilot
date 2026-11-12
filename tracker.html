@@ -134,7 +134,9 @@ textarea { min-height: 84px; resize: vertical; }
     </div>
     <div class="fetch">
       <div class="fetch-btns"><button type="button" class="btn primary" id="addBtn" hidden>Add job</button>
-      <button type="button" class="btn" id="ingestBtn" hidden>Check for new jobs</button></div>
+      <button type="button" class="btn" id="ingestBtn" hidden>Check for new jobs</button>
+      <button type="button" class="btn" id="setBtn" hidden>Settings</button></div>
+      <button type="button" class="linkbtn fetch-line" id="aiLine" hidden title="Change in Settings"></button>
       <span class="fetch-line" id="ingestLine"></span>
       <span class="fetch-line" id="updated" hidden></span>
     </div>
@@ -224,6 +226,44 @@ textarea { min-height: 84px; resize: vertical; }
   </form>
 </dialog>
 
+<dialog id="setDlg" aria-labelledby="setTitle">
+  <form class="ed" id="setForm" method="dialog">
+    <h3 id="setTitle">Settings</h3>
+    <p class="hint">Saved in <code>config.json</code> in <span id="stFolder"></span>. It never leaves this computer.</p>
+    <fieldset class="runners">
+      <legend>Which AI writes your packets and scores fit?</legend>
+      <div id="stRunners" class="runner-list"></div>
+    </fieldset>
+    <div id="stModelBox" class="model-box">
+      <label class="field" for="stModel">Model
+        <input id="stModel" type="text" list="stModels" autocomplete="off" spellcheck="false" maxlength="200">
+      </label>
+      <datalist id="stModels"></datalist>
+      <p class="hint" id="stModelHint"></p>
+      <div class="testrow"><button type="button" class="btn small" id="stTest">Test this AI</button><span class="status" id="stTestLine" role="status"></span></div>
+      <details id="stTestOut" hidden><summary>What it printed</summary><pre id="stTestPre"></pre></details>
+    </div>
+    <h4 class="set-h">Your documents</h4>
+    <label class="field" for="stName">Name on your PDF and Word files
+      <input id="stName" type="text" maxlength="100" autocomplete="off">
+      <span class="hint" id="stNameHint"></span>
+    </label>
+    <label class="field" for="stResume">Master resume (a path in this folder, or anywhere on this computer)
+      <input id="stResume" type="text" maxlength="500" autocomplete="off" spellcheck="false">
+      <span class="hint" id="stResumeHint"></span>
+    </label>
+    <label class="field" for="stChrome">Chrome (it prints the PDFs)
+      <input id="stChrome" type="text" maxlength="500" autocomplete="off" spellcheck="false">
+      <span class="hint" id="stChromeHint"></span>
+    </label>
+    <h4 class="set-h">Finding jobs</h4>
+    <label class="check"><input type="checkbox" id="stPerm"> Skip contract, temporary, and part-time postings</label>
+    <label class="check" id="stScoreWrap"><input type="checkbox" id="stScore"> Give each new LinkedIn alert job a quick Fit guess from its title</label>
+    <p class="hint" id="stAlerts"></p>
+    <div class="actions"><span class="status" id="stStatus" role="status"></span><div><button type="button" class="btn" id="stCancel">Cancel</button><button type="submit" class="btn primary" id="stSave">Save</button></div></div>
+  </form>
+</dialog>
+
 <dialog id="dlg" aria-labelledby="dTitle">
   <div class="ed">
     <h3 id="dTitle"></h3>
@@ -294,6 +334,28 @@ textarea { min-height: 84px; resize: vertical; }
   .score-line { font-size: 0.82rem; color: var(--muted); }
   .score-line.bad { color: var(--bad); }
   #sReply { width: 100%; min-height: 120px; font: 0.82rem/1.4 var(--mono); }
+  .runners { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .runners legend { font-weight: 600; margin-bottom: 8px; padding: 0; }
+  .runner-list { display: grid; gap: 8px; }
+  .runner { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+  .runner:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .runner input { margin-top: 4px; accent-color: var(--accent); }
+  .runner b { font-weight: 600; }
+  .runner .chip { margin-left: 6px; vertical-align: 1px; }
+  .runner .hint { display: block; margin-top: 2px; font-size: 0.8rem; }
+  .runner code, .model-box code, #setDlg code { font-family: var(--mono); font-size: 0.78rem; }
+  .model-box { display: grid; gap: 8px; }
+  .model-box[hidden] { display: none; }
+  .testrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .testrow .status.bad, #stStatus.bad { color: var(--bad); }
+  .testrow .status.good { color: var(--good); }
+  #stTestPre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; font: 0.75rem/1.4 var(--mono); background: var(--bg); border-radius: 6px; padding: 8px; margin: 6px 0 0; }
+  .set-h { margin: 6px 0 0; font: 600 0.95rem var(--body); border-top: 1px solid var(--line); padding-top: 14px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.9rem; }
+  .check input { margin-top: 4px; accent-color: var(--accent); }
+  .check:has(input:disabled) { color: var(--muted); }
+  #aiLine { justify-self: end; }
+  @media (max-width: 720px) { #aiLine { justify-self: start; } }
 </style>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <script src="jobs.js"></script>
@@ -774,8 +836,103 @@ if (EDITABLE) loadScore();
 async function loadInfo() {
   if (!EDITABLE) return;
   try { info = await (await fetch("/api/info", { cache: "no-store" })).json(); } catch { return; }
-  render();
+  showAi(); render();
 }
+
+// Settings: which AI runs, its model, the name on documents, the resume, Chrome, alert options.
+const INSTALL = {
+  claude: "Install Claude Code (see docs.claude.com/en/docs/claude-code), then run <code>claude</code> once in a terminal to sign in.",
+  codex: "Install it with <code>npm install -g @openai/codex</code>, then run <code>codex</code> once in a terminal to sign in with ChatGPT.",
+  opencode: "Install it with <code>npm install -g opencode-ai</code>, then run <code>opencode</code> once to set up a provider.",
+};
+const MODEL_HINT = {
+  claude: "Leave blank for Claude Code's default, or type an alias like <code>sonnet</code> or <code>opus</code>.",
+  codex: "Leave blank for Codex's default model, or type a model name your account offers.",
+  opencode: "Format <code>provider/model</code>. Leave blank for OpenCode's default.",
+};
+let settings = null, modelFor = {}, modelsLoaded = false;
+function setRunner() { return (document.querySelector('input[name="runner"]:checked') || {}).value || "manual"; }
+function showRunner(prev) {
+  const r = setRunner();
+  if (prev && prev !== r) modelFor[prev] = $("stModel").value.trim();
+  $("stModelBox").hidden = r === "manual";
+  $("stModel").value = modelFor[r] || "";
+  $("stModelHint").innerHTML = MODEL_HINT[r] || "";
+  $("stTestLine").textContent = ""; $("stTestLine").className = "status"; $("stTestOut").hidden = true;
+  $("stScore").disabled = r === "manual";
+  if (r === "opencode" && !modelsLoaded) {
+    modelsLoaded = true;
+    fetch("/api/models", { cache: "no-store" }).then((x) => x.json()).then((d) => {
+      $("stModels").replaceChildren(...(d.models || []).map((m) => { const o = el("option"); o.value = m; return o; }));
+      if ((d.models || []).length) $("stModelHint").innerHTML = MODEL_HINT.opencode + ` Click the box to pick from the ${d.models.length} models OpenCode knows.`;
+    }).catch(() => {});
+  }
+}
+async function openSettings() {
+  $("stStatus").textContent = ""; $("stStatus").className = "status";
+  try { settings = await (await fetch("/api/settings", { cache: "no-store" })).json(); }
+  catch { toast("Can't reach the board server.", false); return; }
+  const S = settings;
+  $("stFolder").textContent = S.folder;
+  modelFor = { [S.runner]: S.model || "" };
+  let prev = S.runner;
+  $("stRunners").replaceChildren(...S.runners.map((r) => {
+    const lab = el("label", "runner"), inp = el("input");
+    inp.type = "radio"; inp.name = "runner"; inp.value = r.id; inp.checked = r.id === S.runner;
+    inp.onchange = () => { showRunner(prev); prev = setRunner(); };
+    const text = el("span"); text.append(el("b", null, r.label));
+    if (r.id !== "manual") text.append(el("span", "chip " + (r.installed ? "good" : "warn"), r.installed ? "Installed" : "Not installed"));
+    text.append(el("span", "hint", r.blurb));
+    if (!r.installed && INSTALL[r.id]) { const h = el("span", "hint"); h.innerHTML = INSTALL[r.id]; text.append(h); }
+    lab.append(inp, text); return lab;
+  }));
+  $("stName").value = S.document_name; $("stName").placeholder = S.default_name || "Your Name";
+  $("stNameHint").textContent = `Files are named like ${(S.document_name || S.default_name || "Your Name").replace(/[^A-Za-z0-9]+/g, "-")}-Resume.pdf. Leave blank to use the name at the top of your resume.`;
+  $("stResume").value = S.resume_master;
+  $("stResumeHint").textContent = S.resume_found ? `Found: ${S.resume_full}` : `Not found at ${S.resume_full}. Put your resume there (see resume/README.md) or fix the path.`;
+  $("stResumeHint").style.color = S.resume_found ? "" : "var(--bad)";
+  $("stChrome").value = S.chrome_path; $("stChrome").placeholder = S.chrome_found || "Full path to chrome" + (S.windows ? ".exe" : "");
+  $("stChromeHint").textContent = S.chrome_ok ? "Found." : S.chrome_found ? `Leave blank to use ${S.chrome_found}.` : "Chrome wasn't found. Install it, or paste the full path to Chrome or Edge.";
+  $("stPerm").checked = S.permanent_only; $("stScore").checked = S.scoring;
+  $("stScoreWrap").hidden = !S.alerts;
+  $("stAlerts").innerHTML = "";
+  $("stAlerts").append(S.alerts
+    ? `LinkedIn alerts are on: ${S.worker_url} (key ${S.worker_key ? "in " + S.worker_key : "missing: run the setup wizard"}).`
+    : "LinkedIn alerts aren't set up. They're optional; to add them, run the setup wizard (see docs/linkedin-alerts.md).");
+  showRunner();
+  $("setDlg").showModal();
+}
+$("stTest").onclick = async () => {
+  const runner = setRunner(), model = $("stModel").value.trim();
+  $("stTest").disabled = true; $("stTestOut").hidden = true;
+  $("stTestLine").className = "status"; $("stTestLine").textContent = "Asking it a test question. This can take a minute…";
+  try {
+    const r = await post("/api/test-agent", { runner, model });
+    $("stTestLine").textContent = r.message; $("stTestLine").className = "status " + (r.ok ? "good" : "bad");
+    if (r.output) { $("stTestPre").textContent = r.output; $("stTestOut").hidden = false; $("stTestOut").open = !r.ok; }
+  } catch (e) { $("stTestLine").textContent = e.message; $("stTestLine").className = "status bad"; }
+  $("stTest").disabled = false;
+};
+$("stCancel").onclick = () => $("setDlg").close();
+$("setForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  $("stSave").disabled = true; $("stStatus").className = "status"; $("stStatus").textContent = "Saving…";
+  try {
+    const r = await post("/api/settings", { runner: setRunner(), model: setRunner() === "manual" ? (settings.model || "") : $("stModel").value.trim(),
+      document_name: $("stName").value, resume_master: $("stResume").value, chrome_path: $("stChrome").value,
+      permanent_only: $("stPerm").checked, scoring: $("stScore").checked });
+    $("setDlg").close();
+    await loadInfo(); loadScore();
+    toast("Settings saved." + (r.warnings.length ? " " + r.warnings.join(" ") : ""), false);
+  } catch (e) { $("stStatus").textContent = e.message; $("stStatus").className = "status bad"; }
+  $("stSave").disabled = false;
+};
+function showAi() {
+  const line = $("aiLine");
+  line.hidden = !info.runner_label;
+  line.textContent = "AI: " + (info.runner_label || "") + (info.model ? " · " + info.model : "");
+}
+$("aiLine").onclick = openSettings;
 
 // Add job: paste a link, Look up fills what it can, you check it and save.
 let lookedUp = null;
@@ -818,7 +975,7 @@ $("addForm").onsubmit = async (ev) => {
   } catch (e) { $("aStatus").textContent = e.message; }
   $("aSave").disabled = false;
 };
-if (EDITABLE) { $("addBtn").hidden = false; $("addBtn").onclick = openAdd; loadInfo(); }
+if (EDITABLE) { $("addBtn").hidden = false; $("addBtn").onclick = openAdd; $("setBtn").hidden = false; $("setBtn").onclick = openSettings; loadInfo(); }
 $("updated").textContent = window.JOBS_UPDATED ? "Last updated " + window.JOBS_UPDATED : "";
 render();
 loadPackets();

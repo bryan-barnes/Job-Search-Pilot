@@ -39,9 +39,11 @@ The tools create any missing file from `templates/` the first time they run.
   interested (→ passed), Posting expired (→ expired), Mark applied, the next stage (Screen,
   Interview, Offer), Not selected (→ rejected), Not fully remote / Confirmed remote, the
   three 1–5 scores, and **Score fit (N)**, which runs `tools/fitscore.py` to have the configured
-  agent score Fit for every listed, unscored job from its posting (the reason goes in `notes`). An optional reason is added to `notes`. **Check for new jobs** runs
-  `tools/ingest-alerts.py` now when LinkedIn alerts are set up; the board server also runs it
-  every 3 hours between 8am and 10pm (output in `ingest.log`). Opened as a plain file, the
+  agent score Fit for every listed, unscored job from its posting (the reason goes in `notes`).
+  An optional reason is added to `notes`. **Check for new jobs** runs `tools/ingest-alerts.py`
+  now when LinkedIn alerts are set up; the board server also runs it every 3 hours between 8am
+  and 10pm (output in `ingest.log`). **Settings** edits `config.json` (which AI runs, its
+  model, the name on documents, the resume path, Chrome) and can test the AI. Opened as a plain file, the
   board is read-only.
 - The board lists **fully remote jobs only** (`remote: "yes"`). Jobs with `remote` "no" or
   "unknown" stay in `jobs.js` but are hidden behind a link. Jobs with status `expired` never show.
@@ -94,7 +96,7 @@ Each job they apply to gets a packet in `applications/<job-id>/`.
    applied to and has no packet; the server queues the ticked ones, 3 at a time. For a single
    job, the dialog's "Prep application" button runs `tools/prep-application.py <job-id>`, which
    saves the posting to `posting.md`, then runs the configured agent (config.json →
-   `agent.runner`: `opencode`, `claude`, or `manual`; see `docs/agents.md`) with
+   `agent.runner`: `manual`, `claude`, `codex`, or `opencode`; see `docs/agents.md`) with
    `tools/application-prompt.md` to write `resume.md`, `cover-letter.md`, `answers.md`, and
    `fit-check.md`. It then builds `<Name>-Resume.pdf/.docx` and `<Name>-Cover-Letter.pdf/.docx`
    (each must stay one page) and writes `apply-in-chrome.md`. In `manual` mode the agent step

@@ -179,7 +179,7 @@ def npm_step() -> None:
 # ---------- 3. settings ----------
 
 def runners_available() -> list[str]:
-    return [r for r in ("claude", "opencode") if have(r)]
+    return [r for r in agent.CLI_RUNNERS if have(r)]
 
 
 def config_step() -> dict:
@@ -190,23 +190,25 @@ def config_step() -> dict:
 
     say("\nWhich AI should write your resume variants and cover letters?\n"
         "  manual    the simplest: the board gives you a prompt to paste into any AI chat\n"
-        "            (Claude, ChatGPT, ...), and you paste its reply back. Nothing to install.\n"
+        "            (ChatGPT, Claude, Gemini, ...), and you paste its reply back. Nothing to install.\n"
         "  claude    the Claude Code CLI does it for you (uses your Claude subscription)\n"
-        "  opencode  the OpenCode CLI does it for you, with any model you've set up\n")
+        "  codex     OpenAI's Codex CLI does it for you (uses your ChatGPT subscription)\n"
+        "  opencode  the OpenCode CLI does it for you, with any model you've set up\n"
+        "You can change this any time under Settings on the board.\n")
     avail = runners_available()
     current = agent.runner_name(cfg)
     default = current if current != "manual" or not avail else avail[0]
     if avail:
         say(f"(I see these installed: {', '.join(avail)}.)")
-    runner = ask("Choose (manual / claude / opencode)", default)
+    runner = ask("Choose (manual / claude / codex / opencode)", default)
     while runner not in agent.RUNNERS:
-        runner = ask("That's not one of the three. Choose (manual / claude / opencode)", default)
+        runner = ask("That's not one of them. Choose (manual / claude / codex / opencode)", default)
     if runner != "manual" and runner not in avail:
         say(f"(I don't see the {runner} CLI on this computer. Install it (docs/agents.md); until\n"
             f" then, packets will fail with a message saying so.)")
     cfg.setdefault("agent", {})["runner"] = runner
-    if runner == "opencode":
-        cfg["agent"]["model"] = ask("Which model? (blank = whatever OpenCode is set to)",
+    if runner != "manual":
+        cfg["agent"]["model"] = ask(f"Which model? (blank = whatever {runner} is set to)",
                                     cfg["agent"].get("model") or "") or None
 
     cfg["permanent_only"] = yn("\nSkip contract, temporary, and part-time postings automatically?",

@@ -41,5 +41,5 @@ not Python): install it as above.
   edit your files in Notepad, that's fine (including Notepad's "UTF-8 with BOM").
 - If PowerShell complains about "execution policy", you don't need a `.ps1` script:
   everything here is Python, `.bat`, or `.js`.
-- If you use the `claude` or `opencode` runner, install it so it's on your PATH (see
+- If you use the `claude`, `codex`, or `opencode` runner, install it so it's on your PATH (see
   `docs/agents.md`); the board passes it the prompt safely on Windows.

@@ -24,6 +24,10 @@ GET  /api/score           the scoring run's progress
 POST /api/score-reply {"text"}  manual mode: apply the AI's pasted scores
 POST /api/ingest          check for new jobs now (tools/ingest-alerts.py, in the background)
 GET  /api/ingest          whether that's running, and the last run's result
+GET  /api/settings        the Settings screen: which AI, model, name, resume, Chrome, alerts
+POST /api/settings {...}  save those settings to config.json
+POST /api/test-agent {"runner", "model"?}  send a tiny test prompt through that AI
+GET  /api/models          OpenCode's provider/model IDs
 
 The server also runs ingest-alerts.py on its own every few hours during the day (AUTO_* below),
 so new alert emails reach the board and closed postings leave it without anyone clicking.
@@ -44,6 +48,7 @@ from threading import Lock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent  # noqa: E402
+import documents  # noqa: E402
 import fitscore  # noqa: E402
 import jobsfile  # noqa: E402
 import linkedin_check  # noqa: E402
@@ -95,6 +100,55 @@ def start_ingest() -> bool:
                 PY + [str(HOME / "tools/ingest-alerts.py")],
                 cwd=HOME, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         return True
+
+
+test_lock = Lock()
+testing = False
+
+
+def master_path(cfg: dict) -> Path:
+    return HOME / Path(cfg.get("resume_master") or "resume/master.md").expanduser()
+
+
+def settings_view() -> dict:
+    """What the Settings screen shows. Never includes the Worker key itself."""
+    cfg = config()
+    runners = [{"id": r, "label": agent.RUNNER_INFO[r][0], "blurb": agent.RUNNER_INFO[r][1],
+                "installed": r == "manual" or bool(agent.executable({"agent": {"runner": r}}))}
+               for r in agent.RUNNERS]
+    master = master_path(cfg)
+    chrome = cfg.get("chrome_path") or ""
+    found_chrome = agent.find_chrome()
+    key = None
+    if agent.alerts_configured(cfg):
+        tok = str(cfg.get("worker_token") or "").strip()
+        key = "config.json" if tok and "YOUR-" not in tok.upper() else (
+            "Keychain" if agent.worker_token(cfg, required=False) else None)
+    try:
+        default_name = documents.master_name(master) if master.is_file() else ""
+    except Exception:  # noqa: BLE001 - a display hint only
+        default_name = ""
+    return {
+        "runner": agent.runner_name(cfg), "model": agent.model_name(cfg), "runners": runners,
+        "permanent_only": bool(cfg.get("permanent_only", True)),
+        "scoring": bool(cfg.get("scoring", {}).get("enabled", False)),
+        "document_name": cfg.get("document_name") or "", "default_name": default_name,
+        "resume_master": cfg.get("resume_master") or "resume/master.md",
+        "resume_found": master.is_file(), "resume_full": str(master),
+        "chrome_path": chrome, "chrome_ok": bool(chrome) and Path(chrome).is_file(),
+        "chrome_found": found_chrome or "",
+        "alerts": agent.alerts_configured(cfg), "worker_url": cfg.get("worker_url") or "",
+        "worker_key": key, "folder": str(HOME), "windows": sys.platform == "win32",
+    }
+
+
+def clean_model(value) -> str | None:
+    model = str(value or "").strip()
+    if not model:
+        return None
+    if len(model) > 200 or not re.fullmatch(r"[\w.@:/\[\]-]+", model) or model.startswith("-"):
+        raise ValueError("That model name has characters a model ID doesn't use.")
+    return model
 
 
 def ingest_status() -> dict:
@@ -174,6 +228,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"editable": jobsfile.ids(jobsfile.read()),
                                     "alerts": agent.alerts_configured(cfg),
                                     "runner": agent.runner_name(cfg),
+                                    "model": agent.model_name(cfg),
+                                    "runner_label": agent.RUNNER_INFO.get(
+                                        agent.runner_name(cfg), ("?",))[0],
                                     "windows": sys.platform == "win32"})
         if path == "/api/packets":
             return self._json(200, packets())
@@ -181,6 +238,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, ingest_status())
         if path == "/api/score":
             return self._json(200, score_status())
+        if path == "/api/settings":
+            return self._json(200, settings_view())
+        if path == "/api/models":
+            return self._json(200, {"models": agent.opencode_models(config())})
         if path == "/api/score-prompt" and (HOME / "scoring" / "RUN-THIS.md").is_file():
             return self._send(200, (HOME / "scoring" / "RUN-THIS.md").read_bytes(), "text/plain")
         m = re.fullmatch(r"/api/packet/([a-z0-9-]+)/([\w.-]+\.md)", path)
@@ -209,11 +270,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Bad JSON"})
         if self.path == "/api/lookup":  # network only, so it doesn't hold the lock
             return self._lookup(body)
+        if self.path == "/api/test-agent":  # can take minutes; doesn't touch jobs.js
+            return self._test_agent(body)
         route = {"/api/update": self._update, "/api/undo": self._undo, "/api/prep": self._prep,
                  "/api/prep-batch": self._prep_batch, "/api/build": self._build,
                  "/api/reply": self._reply, "/api/add": self._add,
                  "/api/score": self._score, "/api/score-reply": self._score_reply,
-                 "/api/open": self._open, "/api/ingest": self._ingest}.get(self.path)
+                 "/api/open": self._open, "/api/ingest": self._ingest,
+                 "/api/settings": self._settings}.get(self.path)
         if not route:
             return self._json(404, {"error": "Not found"})
         with lock:
@@ -406,6 +470,70 @@ class Handler(BaseHTTPRequestHandler):
             (APPS / job_id / name).write_text(content, encoding="utf-8")
         start_build(job_id)
         self._json(200, {"ok": True, "saved": sorted(files)})
+
+    def _settings(self, body: dict):
+        cfg = config()
+        if not cfg:
+            return self._json(500, {"error": "config.json is missing or isn't valid JSON. Run "
+                                             "tools/setup-wizard.py to make a new one."})
+        try:
+            if "runner" in body:
+                if body["runner"] not in agent.RUNNERS:
+                    return self._json(400, {"error": "Unknown AI choice"})
+                cfg.setdefault("agent", {})["runner"] = body["runner"]
+            if "model" in body:
+                cfg.setdefault("agent", {})["model"] = clean_model(body["model"])
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+        for key in ("permanent_only", "scoring"):
+            if key in body and not isinstance(body[key], bool):
+                return self._json(400, {"error": f"{key} must be true or false"})
+        if "permanent_only" in body:
+            cfg["permanent_only"] = body["permanent_only"]
+        if "scoring" in body:
+            cfg["scoring"] = {**cfg.get("scoring", {}), "enabled": body["scoring"]}
+        if "document_name" in body:
+            name = " ".join(str(body["document_name"] or "").split())[:100]
+            cfg["document_name"] = name or None
+        if "resume_master" in body:
+            rm = str(body["resume_master"] or "").strip().strip('"')[:500]
+            cfg["resume_master"] = rm or "resume/master.md"
+        if "chrome_path" in body:
+            cp = str(body["chrome_path"] or "").strip().strip('"')[:500]
+            if cp:
+                # It's a program the tools run, so only accept an existing Chrome/Edge/Chromium.
+                if not Path(cp).is_file() or not re.search(r"chrom|edge|brave", Path(cp).name, re.I):
+                    return self._json(400, {"error": "That isn't a Chrome (or Edge/Chromium) "
+                                                     "program on this computer."})
+            cfg["chrome_path"] = cp or agent.find_chrome()
+        agent.save_config(cfg)
+        view = settings_view()
+        warn = []
+        if not view["resume_found"]:
+            warn.append(f"No resume at {view['resume_full']} yet.")
+        chosen = next(r for r in view["runners"] if r["id"] == view["runner"])
+        if not chosen["installed"]:
+            warn.append(f"The {view['runner']} CLI isn't installed yet (see docs/agents.md).")
+        self._json(200, {"ok": True, "settings": view, "warnings": warn})
+
+    def _test_agent(self, body: dict):
+        global testing
+        runner = body.get("runner")
+        if runner not in agent.RUNNERS:
+            return self._json(400, {"error": "Unknown AI choice"})
+        try:
+            model = clean_model(body.get("model"))
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+        with test_lock:
+            if testing:
+                return self._json(409, {"error": "A test is already running."})
+            testing = True
+        try:
+            result = agent.test_runner({"agent": {"runner": runner, "model": model}})
+        finally:
+            testing = False
+        self._json(200, result)
 
     def _open(self, body: dict):
         job_id, name = body.get("id"), body.get("file")

@@ -75,7 +75,24 @@ def main() -> None:
             return {n for n in names if n == "master.md" or n.endswith((".pdf", ".docx"))}
         return {n for n in names if n == "__pycache__"}
     shutil.copytree(SRC, root, ignore=skip)
-    env = {**os.environ, "JOB_BOARD_PORT": str(PORT)}
+    # A stand-in Codex CLI, to check the codex runner's command line and the Settings test.
+    fakebin = tmp / "fakebin"
+    fakebin.mkdir()
+    if os.name == "nt":
+        (fakebin / "codex.cmd").write_text(
+            '@echo off\r\nif not "%~1"=="exec" exit /b 3\r\n:loop\r\nif "%~1"=="" goto done\r\n'
+            'if "%~1"=="--output-last-message" set "OUT=%~2"\r\nshift\r\ngoto loop\r\n:done\r\n'
+            'more > nul\r\necho transcript: tokens used 4,200\r\nif defined OUT >"%OUT%" echo 42\r\n',
+            encoding="utf-8")
+    else:
+        fake = fakebin / "codex"
+        fake.write_text('#!/bin/sh\n[ "$1" = exec ] || exit 3\nout=""\n'
+                        'while [ $# -gt 0 ]; do [ "$1" = --output-last-message ] && out="$2"; shift; done\n'
+                        'cat >/dev/null\necho "transcript: tokens used 4,200"\n'
+                        '[ -n "$out" ] && echo 42 > "$out"\nexit 0\n', encoding="utf-8")
+        fake.chmod(0o755)
+    env = {**os.environ, "JOB_BOARD_PORT": str(PORT),
+           "PATH": str(fakebin) + os.pathsep + os.environ.get("PATH", "")}
     server = None
     try:
         step("Board server")
@@ -195,6 +212,31 @@ def main() -> None:
                            capture_output=True, text=True, encoding="utf-8", timeout=120)
         print(r.stdout[-600:], r.stderr[-600:])
         check(r.returncode == 0 and "Alerts not set up" in r.stdout, "ingest runs the re-check only")
+
+        step("Settings and AI runners")
+        code, st = call("/api/settings")
+        check(code == 200 and st["runner"] == "manual"
+              and [r["id"] for r in st["runners"]] == ["manual", "claude", "codex", "opencode"],
+              "settings list the four AI choices")
+        check(next(r for r in st["runners"] if r["id"] == "codex")["installed"], "fake codex found")
+        check("worker_token" not in st, "settings never include the Worker key")
+        code, _ = call("/api/settings", {"runner": "gpt"})
+        check(code == 400, "unknown AI refused")
+        code, _ = call("/api/settings", {"model": "--dangerous"})
+        check(code == 400, "model that looks like a flag refused")
+        code, _ = call("/api/settings", {"chrome_path": str(root / "tools" / "agent.py")})
+        check(code == 400, "Chrome path that isn't Chrome refused")
+        code, res = call("/api/test-agent", {"runner": "codex", "model": "gpt-test"})
+        check(code == 200 and res["ok"], f"codex test answers through stdin and -o {res}")
+        code, res = call("/api/settings", {"runner": "codex", "model": "gpt-test", "document_name": "Zoë Example",
+                                           "permanent_only": False})
+        check(code == 200 and res["ok"], "settings saved")
+        cfg = json.loads((root / "config.json").read_text(encoding="utf-8"))
+        check(cfg["agent"] == {"runner": "codex", "model": "gpt-test"} and cfg["document_name"] == "Zoë Example"
+              and cfg["permanent_only"] is False and "chrome_path" in cfg, "config.json updated, other keys kept")
+        code, info = call("/api/info")
+        check(info["runner"] == "codex" and info["model"] == "gpt-test", "board header shows the new AI")
+        call("/api/settings", {"runner": "manual", "model": "", "permanent_only": True})
 
         step("Security")
         req = urllib.request.Request(BASE + "/api/update", method="POST",
