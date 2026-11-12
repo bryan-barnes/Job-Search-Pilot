@@ -50,7 +50,8 @@ repo holds only the tools and templates, and your own files are never committed 
    `experience-bank.md`.
 4. **Open the board**: double-click `Open Job Board.command` (Mac) or `Open Job Board.bat`
    (Windows). It opens http://127.0.0.1:8765/ in your browser. Click **Add job** and paste a
-   posting's link.
+   posting's link. **Settings** (top right) shows which AI writes your packets and lets you
+   switch (copy and paste, Claude Code, Codex for ChatGPT users, or OpenCode) and test it.
 
 New to Terminal? On a Mac, open Terminal, type `cd ` (with a space), drag the folder onto the
 window, and press Return. On Windows, open the folder, click the address bar, type `cmd`, and
