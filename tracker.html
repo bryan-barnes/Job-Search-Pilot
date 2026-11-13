@@ -289,7 +289,7 @@ textarea { min-height: 84px; resize: vertical; }
 </dialog>
 <style>
   dl.grid2 { margin: 0; }
-  dl.grid2 div { display: grid; gap: 2px; }
+  dl.grid2 div { display: grid; gap: 2px; align-content: start; }
   dt { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   dd.wide, div.wide { grid-column: 1 / -1; }
@@ -328,6 +328,8 @@ textarea { min-height: 84px; resize: vertical; }
   .lookup input { width: 100%; }
   .scores .field { gap: 6px; }
   .reply { display: grid; gap: 8px; }
+  .own-files { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 0; }
+  .own-files .btn { font-size: 0.82rem; padding: 4px 10px; }
   .reply textarea { width: 100%; min-height: 120px; font: 0.82rem/1.4 var(--mono); }
   .steps { margin: 0; padding-left: 20px; font-size: 0.88rem; display: grid; gap: 4px; }
   .confirm code { font-family: var(--mono); font-size: 0.8rem; }
@@ -439,7 +441,7 @@ function rowFor(j) {
   const meta = el("div", "meta");
   if (j.pay) meta.append(el("span", "pay", j.pay));
   if (j.location) meta.append(el("span", null, j.location));
-  if (j.applied) meta.append(el("span", null, `Applied ${days(j.applied)}d ago`));
+  if (j.applied) { const d = days(j.applied); meta.append(el("span", null, d <= 0 ? "Applied today" : d === 1 ? "Applied yesterday" : `Applied ${d}d ago`)); }
   if (j.next) meta.append(el("span", null, "Next: " + j.next + (j.nextDate ? ` (${j.nextDate})` : "")));
   who.append(el("h2", null, j.role || "Untitled role"), el("div", "co", j.company || ""), meta);
   const ch = el("div", "chips");
@@ -672,13 +674,15 @@ function renderPacket(j) {
       try { const r = await post("/api/reply", { id: j.id, text: box.value }); packets[j.id] = { state: "running", step: "Building documents" }; renderPacket(j); poll(); }
       catch (e) { line.textContent = e.message; save.disabled = false; }
     });
-    const copy = btn("Copy the prompt", "primary", async () => {
+    const copy = btn("Copy the prompt", "", async () => {
       try { const r = await fetch(`/api/packet/${j.id}/RUN-THIS.md`); await navigator.clipboard.writeText(await r.text()); copy.textContent = "Copied"; }
       catch (e) { line.textContent = "Couldn't copy: " + e.message + ". Open RUN-THIS.md in the folder instead."; }
     });
     const wrap = el("div", "reply"); wrap.append(steps, box);
     $("dReply").append(wrap);
-    btns.append(copy, save, el("span", "hint", "Wrote the files yourself?"), build("Build documents"), open("Open folder"));
+    const own = el("p", "hint own-files", "Wrote the files yourself (or with an AI that can save files)? Put them in the packet folder, then:");
+    own.append(" ", build("Build documents"), " ", open("Open folder"));
+    btns.append(copy, save, own);
   } else {
     line.textContent = pk.step + ". Read the fit check first, then the letter and resume. Edited the .md files? Click Rebuild documents. Then copy the Chrome prompt into Claude in Chrome.";
     // The PDF buttons come from the packet's actual files (the builders name them after your name).

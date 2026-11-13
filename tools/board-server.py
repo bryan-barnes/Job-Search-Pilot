@@ -110,6 +110,15 @@ def master_path(cfg: dict) -> Path:
     return HOME / Path(cfg.get("resume_master") or "resume/master.md").expanduser()
 
 
+def show_path(p) -> str:
+    """A path for display, with the home folder shortened to ~."""
+    p, home = Path(p), Path.home()
+    try:
+        return "~" + os.sep + str(p.relative_to(home)) if p != home else "~"
+    except ValueError:
+        return str(p)
+
+
 def settings_view() -> dict:
     """What the Settings screen shows. Never includes the Worker key itself."""
     cfg = config()
@@ -134,11 +143,11 @@ def settings_view() -> dict:
         "scoring": bool(cfg.get("scoring", {}).get("enabled", False)),
         "document_name": cfg.get("document_name") or "", "default_name": default_name,
         "resume_master": cfg.get("resume_master") or "resume/master.md",
-        "resume_found": master.is_file(), "resume_full": str(master),
+        "resume_found": master.is_file(), "resume_full": show_path(master),
         "chrome_path": chrome, "chrome_ok": bool(chrome) and Path(chrome).is_file(),
         "chrome_found": found_chrome or "",
         "alerts": agent.alerts_configured(cfg), "worker_url": cfg.get("worker_url") or "",
-        "worker_key": key, "folder": str(HOME), "windows": sys.platform == "win32",
+        "worker_key": key, "folder": show_path(HOME), "windows": sys.platform == "win32",
     }
 
 

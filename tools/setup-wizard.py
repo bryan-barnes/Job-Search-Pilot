@@ -262,11 +262,11 @@ def files_step() -> None:
         "most; the others make the letters and answers better.")
     for rel, what in FILES:
         state = "not filled in yet" if still_template(rel) else "you've started it"
-        say(f"\n--- {rel}  ({state})\n    {what}")
+        say(f"\n--- {rel}  ({state})\n    " + what.replace("\n", "\n    "))
         if still_template(rel) and yn(f"Open {rel} now?", not AUTO_YES):
             open_in_default_app(HOME / rel)
             yn("Tell me when you've saved it (or say no and finish it later)", True)
-    say("\nTip: if you use Claude Code or OpenCode, you can open this folder in it and say\n"
+    say("\nTip: if you use Claude Code, Codex, or OpenCode, you can open this folder in it and say\n"
         "\"help me fill in about-me.md and my experience bank\": it will interview you.")
 
 

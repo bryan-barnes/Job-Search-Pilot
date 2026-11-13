@@ -5,6 +5,8 @@ automatic LinkedIn alert feed, and a per-job application workflow where an AI wr
 resume variant, cover letter, and form answers from material you've approved. You review
 everything; nothing is ever submitted without you.
 
+<img src="docs/images/board.png" alt="The job board: jobs ranked by score, with stage counts, Add job, and Settings" width="800">
+
 Runs on **Mac and Windows**. Your resume, jobs, and applications stay on your computer: the
 repo holds only the tools and templates, and your own files are never committed (so you can
 `git pull` updates any time without conflicts).
@@ -60,6 +62,62 @@ press Enter.
 **Mac, downloaded ZIP:** the first time you double-click `Open Job Board.command`, macOS may say
 it's from an unidentified developer. The setup wizard clears that for you; if you skipped it,
 right-click the file → Open → Open.
+
+## Setup, step by step
+
+These screenshots are from a Mac, with a made-up person (Alex Rivera) and made-up employers.
+On Windows the steps are the same; you start the wizard with `py tools\setup-wizard.py`.
+
+**1. Run the setup wizard.** It checks for Python, Node.js, and Chrome, installs the one Node
+package, and asks which AI should write your applications. Press Enter to keep the answer in
+brackets. Alex has a ChatGPT subscription, so they pick `codex`.
+
+<img src="docs/images/wizard-1.png" alt="Setup wizard steps 1 to 3: the tools check, the Node package, and choosing an AI" width="640">
+
+**2. Fill in your files.** The wizard makes your own copies of the files to fill in and offers
+to open each one. `resume/master.md` and `about-me.md` matter most. Then it test-builds your
+resume, which has to fit on one page.
+
+<img src="docs/images/wizard-2.png" alt="Setup wizard steps 4 and 5: your files, then a test build of the resume to a one-page PDF" width="640">
+
+**3. Start the board.** The wizard starts it; after that, double-click `Open Job Board.command`
+(Mac) or `Open Job Board.bat` (Windows). LinkedIn alerts are optional and can be set up later.
+
+<img src="docs/images/wizard-3.png" alt="Setup wizard steps 6 and 7: the board starts; LinkedIn alerts skipped for now" width="640">
+
+**4. Check your AI under Settings.** The header shows which AI is in use. **Settings** lets you
+switch (copy and paste into any chat, Claude Code, Codex, or OpenCode), pick a model, and
+**Test this AI**, which asks it one quick question. Your name, resume, and Chrome are here too.
+
+<img src="docs/images/settings.png" alt="Settings: four AI choices with installed status, model, a passing test, and your documents" width="560">
+
+**5. Add a job.** Paste the posting's link and click **Look up**: it fills in the role, the
+company, and what the posting says about remote work. Check it, then save.
+
+<img src="docs/images/add-job.png" alt="Add a job: the link, Look up, and the filled-in role, company, location, pay, and remote answer" width="560">
+
+**6. Confirm remote.** Jobs whose posting doesn't clearly say "fully remote" wait in **Check
+remote**. Open the posting, then click Fully remote or Not remote.
+
+<img src="docs/images/check-remote.png" alt="Check remote: one job whose remote status needs confirming, with Open posting, Fully remote, and Not remote" width="800">
+
+**7. Score fit.** **Score fit** has your AI read each posting and score Fit 1 to 5 against your
+resume, with a one-line reason in the notes, including what's missing. Company and Me are
+your own scores.
+
+<img src="docs/images/job-scored.png" alt="A job with Fit 4 from the AI and its reason in the notes" width="560">
+
+**8. Prep the application.** Click a job, then **Prep application**. A few minutes later you
+have a tailored one-page resume, a cover letter, draft answers, a fit check naming the real
+gaps, and a prompt for Claude in Chrome. Read the fit check first.
+
+<img src="docs/images/job-packet.png" alt="A ready packet: Copy Chrome prompt, Fit check, Cover letter PDF, Resume PDF, Answers, and Rebuild documents" width="560">
+
+With **copy and paste** instead of an installed AI, the board gives you the prompt: paste it
+into ChatGPT, Claude, or any assistant, paste the whole reply back, and click **Save reply and
+build**.
+
+<img src="docs/images/manual-paste.png" alt="Copy-and-paste mode: three steps, a box for the AI's reply, Copy the prompt, and Save reply and build" width="560">
 
 ## How a job moves
 

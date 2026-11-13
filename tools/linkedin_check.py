@@ -46,10 +46,22 @@ def _text(fragment: str) -> str:
     return html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", fragment))).strip()
 
 
+def snippet(text: str, start: int, end: int, pad: int = 60) -> str:
+    """About pad characters either side of a match, cut at word boundaries."""
+    a, b = max(0, start - pad), min(len(text), end + pad)
+    if a > 0:
+        sp = text.find(" ", a, start)
+        a = sp + 1 if sp != -1 else a
+    if b < len(text):
+        sp = text.rfind(" ", end, b)
+        b = sp if sp != -1 else b
+    return text[a:b].strip()
+
+
 def classify(title: str, desc: str) -> tuple[str, str]:
     """Return (remote, evidence) from a title and plain-text description."""
     def near(text, m):
-        return text[max(0, m.start() - 60): m.end() + 60].strip()
+        return snippet(text, m.start(), m.end())
     if re.search(r"\bremote\b", title, re.I) and not re.search(r"\bhybrid\b", title, re.I):
         return "yes", f"title: {title}"
     if re.search(r"\bhybrid\b|\bon-?site\b", title, re.I):
