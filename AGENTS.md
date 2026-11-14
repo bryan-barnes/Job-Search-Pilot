@@ -43,10 +43,13 @@ The tools create any missing file from `templates/` the first time they run.
   An optional reason is added to `notes`. **Check for new jobs** runs `tools/ingest-alerts.py`
   now when LinkedIn alerts are set up; the board server also runs it every 3 hours between 8am
   and 10pm (output in `ingest.log`). **Settings** edits `config.json` (which AI runs, its
-  model, the name on documents, the resume path, Chrome) and can test the AI. Opened as a plain file, the
-  board is read-only.
-- The board lists **fully remote jobs only** (`remote: "yes"`). Jobs with `remote` "no" or
-  "unknown" stay in `jobs.js` but are hidden behind a link. Jobs with status `expired` never show.
+  model, the name on documents, the resume path, Chrome, remote-only) and can test the AI.
+  Opened as a plain file, the board is read-only.
+- By default the board lists **fully remote jobs only** (`remote: "yes"`). Jobs with `remote`
+  "no" or "unknown" stay in `jobs.js` but are hidden behind a link. If the owner would also work
+  hybrid or in person, config.json has `"remote_only": false` (Settings → "List fully remote jobs
+  only"): then every job is listed, `remote` is information only, and there's no Check remote
+  step. Jobs with status `expired` never show.
 - `jobs.js` holds the data. Keep it valid JavaScript, in the exact block format shown at the top
   of the file (2-space block indent, 4-space fields, one field per line, unquoted keys). The
   board can only edit jobs written that way, and marks any it can't. After any change, set
@@ -89,12 +92,12 @@ The tools create any missing file from `templates/` the first time they run.
 
 Each job they apply to gets a packet in `applications/<job-id>/`.
 
-1. **Check remote.** The board's "Check remote" mode lists active jobs whose remote status they
-   haven't confirmed. They open the posting, come back, and click Fully remote or Not remote,
-   which sets `remote` and `remoteChecked`.
-2. **Prep.** **Prep packets (N)** on the board lists every job confirmed fully remote that isn't
-   applied to and has no packet; the server queues the ticked ones, 3 at a time. For a single
-   job, the dialog's "Prep application" button runs `tools/prep-application.py <job-id>`, which
+1. **Check remote** (only when `remote_only` is on). The board's "Check remote" mode lists
+   active jobs whose remote status they haven't confirmed. They open the posting, come back,
+   and click Fully remote or Not remote, which sets `remote` and `remoteChecked`.
+2. **Prep.** **Prep packets (N)** on the board lists every job that isn't applied to and has no
+   packet (and, with `remote_only` on, is confirmed fully remote); the server queues the ticked
+   ones, 3 at a time. For a single job, the dialog's "Prep application" button runs `tools/prep-application.py <job-id>`, which
    saves the posting to `posting.md`, then runs the configured agent (config.json →
    `agent.runner`: `manual`, `claude`, `codex`, or `opencode`; see `docs/agents.md`) with
    `tools/application-prompt.md` to write `resume.md`, `cover-letter.md`, `answers.md`, and

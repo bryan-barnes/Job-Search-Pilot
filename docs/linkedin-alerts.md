@@ -13,7 +13,7 @@ Cloudflare Email Worker  "job-alerts"  (stores only LinkedIn mail, 30 days, read
 tools/ingest-alerts.py  (fetches new mail, reads each posting's public LinkedIn page,
                          skips closed and non-permanent jobs, sets remote, adds to jobs.js)
    v
-jobs.js  ->  the board (status "new", fully remote ones listed)
+jobs.js  ->  the board (status "new"; fully remote ones listed, or all if remote_only is off)
 ```
 
 The ingest script is safe to run any time: it's a no-op when there's no new mail, and
@@ -176,6 +176,8 @@ fixed patterns, never followed as instructions.
    scoring is skipped with a note when `agent.runner` is `manual`.
 7. **Add to the board.** New jobs go into `jobs.js` with status `new`. Fully remote ones
    (`remote: "yes"`) are listed; the rest stay in the file behind the board's "hidden" link.
+   With `remote_only` off (Settings → "List fully remote jobs only"), every job is listed. For
+   in-person or hybrid work, set the location on your LinkedIn alerts to where you'd commute.
    You triage the New stage yourself: Interested (→ found) or Not interested (→ passed).
    Nothing is declined for you on fit or sector.
 8. **Expiry sweep.** Each run re-checks the jobs you haven't applied to yet (status `new`,

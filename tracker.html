@@ -174,7 +174,7 @@ textarea { min-height: 84px; resize: vertical; }
     <div class="empty">Loading your jobs…</div>
   </section>
 
-  <p class="note">Only fully remote jobs are listed. Jobs whose posting closed before you applied are removed from the board (the board re-checks open postings every few hours). Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. <span id="alertsNote" hidden>New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. </span>Click a job to score it, move it along, or mark it Not interested, Posting expired, or Not selected. For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
+  <p class="note"><span id="remoteNote">Only fully remote jobs are listed (change that in Settings). </span>Jobs whose posting closed before you applied are removed from the board (the board re-checks open postings every few hours). Jobs flagged <strong>Follow up</strong> are ones you applied to 10 or more days ago with no reply logged. <span id="alertsNote" hidden>New LinkedIn alerts are pulled in every few hours during the day; <strong>Check for new jobs</strong> does it now. </span>Click a job to score it, move it along, or mark it Not interested, Posting expired, or Not selected. For anything else, edit <code>jobs.js</code> or ask an agent working here (the rules are in <code>AGENTS.md</code>).</p>
 </div>
 
 <dialog id="scoreDlg" aria-labelledby="scoreTitle">
@@ -257,6 +257,7 @@ textarea { min-height: 84px; resize: vertical; }
       <span class="hint" id="stChromeHint"></span>
     </label>
     <h4 class="set-h">Finding jobs</h4>
+    <label class="check"><input type="checkbox" id="stRemote"> List fully remote jobs only (untick if you'd also work hybrid or in person)</label>
     <label class="check"><input type="checkbox" id="stPerm"> Skip contract, temporary, and part-time postings</label>
     <label class="check" id="stScoreWrap"><input type="checkbox" id="stScore"> Give each new LinkedIn alert job a quick Fit guess from its title</label>
     <p class="hint" id="stAlerts"></p>
@@ -375,16 +376,20 @@ let showHidden = false;
 let packets = {};
 let lastOpened = null;
 let scoring = false; // a Score fit run is going
-let info = { editable: null, alerts: false, runner: "manual", windows: false }; // from /api/info
+let info = { editable: null, alerts: false, runner: "manual", remote_only: true, windows: false }; // from /api/info
 const prepPicked = new Set(); // jobs ticked in Prep packets mode
 const checkedNow = new Map(); // jobs marked during this Check remote round stay on screen until "Done checking"
-// The board lists fully remote jobs only. Expired postings (closed before you applied) never show.
+// Settings → "List fully remote jobs only" (config remote_only, on by default). When it's on, the
+// board lists fully remote jobs only and each one waits for you to confirm it. When it's off,
+// remote, hybrid, and in-person jobs are all listed and the remote field is just information.
+// Expired postings (closed before you applied) never show.
+const remoteOnly = () => info.remote_only !== false;
 const isRemote = (j) => j.remote === "yes";
 // Anything the auto-check decided (remote, hybrid, or unsure) waits for you to confirm it.
-const needsCheck = (j) => j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked && editable(j);
-// Ready for a packet: not applied yet, remote confirmed by you, no packet yet.
-const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && j.remote === "yes" && !!j.remoteChecked && !packets[j.id] && editable(j);
-const visible = (j) => j.status !== "expired" && (showHidden || isRemote(j));
+const needsCheck = (j) => remoteOnly() && j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked && editable(j);
+// Ready for a packet: not applied yet, no packet yet, and (remote-only) remote confirmed by you.
+const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && (!remoteOnly() || (j.remote === "yes" && !!j.remoteChecked)) && !packets[j.id] && editable(j);
+const visible = (j) => j.status !== "expired" && (showHidden || !remoteOnly() || isRemote(j));
 const inStage = (j, k) => k === "active" ? ACTIVE.has(j.status || "found") : (j.status || "found") === k;
 const $ = (id) => document.getElementById(id);
 const today = () => new Date(new Date().toDateString());
@@ -407,7 +412,8 @@ function chipsFor(j) {
   const nd = days(j.nextDate);
   if (j.nextDate && nd !== null && nd >= 0 && ACTIVE.has(s)) c.push([nd === 0 ? "Due today" : `Overdue ${nd}d`, "warn"]);
   if (j.blocker) c.push([j.blocker.length > 28 ? j.blocker.slice(0, 26) + "…" : j.blocker, "bad"]);
-  if (!isRemote(j)) c.push([j.remote === "no" ? (j.remoteChecked ? "Not remote" : "Not remote (auto-check)") : "Remote unconfirmed", "bad"]);
+  if (!remoteOnly()) { if (j.remote === "yes" || j.remote === "no") c.push([j.remote === "yes" ? "Remote" : "Hybrid or on-site", ""]); }
+  else if (!isRemote(j)) c.push([j.remote === "no" ? (j.remoteChecked ? "Not remote" : "Not remote (auto-check)") : "Remote unconfirmed", "bad"]);
   else if (needsCheck(j)) c.push(["Check remote", "warn"]);
   if (EDITABLE && !editable(j)) c.push(["Can't edit: check jobs.js", "bad"]);
   else if (rated(j) < 3) c.push(["Needs scores", ""]);
@@ -488,7 +494,7 @@ function renderPrepBar(rows) {
   if (!on) return;
   const n = rows.filter((j) => prepPicked.has(j.id)).length;
   const waiting = jobs.filter((j) => needsCheck(j) && j.remote === "yes").length;
-  $("prepIntro").textContent = `These jobs are confirmed fully remote and have no packet yet. Untick any you'd skip. Packets build three at a time, a few minutes each, and the jobs move to Applying.`
+  $("prepIntro").textContent = `These jobs ${remoteOnly() ? "are confirmed fully remote and " : ""}have no packet yet. Untick any you'd skip. Packets build three at a time, a few minutes each, and the jobs move to Applying.`
     + (waiting ? ` ${waiting} more remote job${waiting === 1 ? " still needs" : "s still need"} a remote check first.` : "");
   $("prepGo").textContent = n ? `Prep ${n} packet${n === 1 ? "" : "s"}` : "Nothing ticked";
   $("prepGo").disabled = !n;
@@ -504,9 +510,10 @@ function renderList() {
   });
   const shown = jobs.filter(visible);
   const active = shown.filter((j) => ACTIVE.has(j.status || "found")).length;
-  const hidden = jobs.filter((j) => j.status !== "expired" && !isRemote(j)).length;
+  const hidden = remoteOnly() ? jobs.filter((j) => j.status !== "expired" && !isRemote(j)).length : 0;
+  $("remoteNote").hidden = !remoteOnly();
   const toCheck = jobs.filter(needsCheck).length;
-  $("countLine").textContent = `${shown.length} remote job${shown.length === 1 ? "" : "s"} · ${active} active`;
+  $("countLine").textContent = `${shown.length} ${remoteOnly() ? "remote " : ""}job${shown.length === 1 ? "" : "s"} · ${active} active`;
   $("hiddenBtn").hidden = !hidden || checking;
   $("hiddenBtn").textContent = showHidden ? "Hide jobs that aren't fully remote" : `· ${hidden} not fully remote (show)`;
   $("checkBtn").hidden = !toCheck && !checking && !checkedNow.size;
@@ -521,7 +528,7 @@ function renderList() {
   $("scoreBtn").textContent = `Score fit (${toScore})`;
   renderPrepBar(rows);
   if (!rows.length) {
-    const empty = el("div", "empty", checking ? "All checked. Nice." : prepping ? "No confirmed remote jobs are waiting for a packet." : shown.length ? "No jobs at this stage." : "No jobs yet.");
+    const empty = el("div", "empty", checking ? "All checked. Nice." : prepping ? (remoteOnly() ? "No confirmed remote jobs are waiting for a packet." : "No jobs are waiting for a packet.") : shown.length ? "No jobs at this stage." : "No jobs yet.");
     if (checking && ready && EDITABLE) { empty.append(" "); empty.append(btn(`Prep packets for the ${ready} remote job${ready === 1 ? "" : "s"}`, "primary", startPrepMode)); }
     $("list").replaceChildren(empty); return;
   }
@@ -897,7 +904,7 @@ async function openSettings() {
   $("stResumeHint").style.color = S.resume_found ? "" : "var(--bad)";
   $("stChrome").value = S.chrome_path; $("stChrome").placeholder = S.chrome_found || "Full path to chrome" + (S.windows ? ".exe" : "");
   $("stChromeHint").textContent = S.chrome_ok ? "Found." : S.chrome_found ? `Leave blank to use ${S.chrome_found}.` : "Chrome wasn't found. Install it, or paste the full path to Chrome or Edge.";
-  $("stPerm").checked = S.permanent_only; $("stScore").checked = S.scoring;
+  $("stRemote").checked = S.remote_only; $("stPerm").checked = S.permanent_only; $("stScore").checked = S.scoring;
   $("stScoreWrap").hidden = !S.alerts;
   $("stAlerts").innerHTML = "";
   $("stAlerts").append(S.alerts
@@ -924,7 +931,7 @@ $("setForm").onsubmit = async (ev) => {
   try {
     const r = await post("/api/settings", { runner: setRunner(), model: setRunner() === "manual" ? (settings.model || "") : $("stModel").value.trim(),
       document_name: $("stName").value, resume_master: $("stResume").value, chrome_path: $("stChrome").value,
-      permanent_only: $("stPerm").checked, scoring: $("stScore").checked });
+      remote_only: $("stRemote").checked, permanent_only: $("stPerm").checked, scoring: $("stScore").checked });
     $("setDlg").close();
     await loadInfo(); loadScore();
     toast("Settings saved." + (r.warnings.length ? " " + r.warnings.join(" ") : ""), false);
@@ -975,7 +982,7 @@ $("addForm").onsubmit = async (ev) => {
       evidence: lookedUp && lookedUp.remote === remote ? lookedUp.evidence : "" });
     $("addDlg").close();
     lastJobsText = ""; await refreshJobs();
-    toast(`Added: ${$("aRole").value}` + (remote === "yes" ? "" : " (hidden until you confirm it's fully remote)"));
+    toast(`Added: ${$("aRole").value}` + (remote === "yes" || !remoteOnly() ? "" : " (hidden until you confirm it's fully remote)"));
   } catch (e) { $("aStatus").textContent = e.message; }
   $("aSave").disabled = false;
 };

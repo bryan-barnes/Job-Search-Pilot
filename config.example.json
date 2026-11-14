@@ -3,6 +3,7 @@
     "runner": "manual",
     "model": null
   },
+  "remote_only": true,
   "permanent_only": true,
   "scoring": {
     "enabled": false

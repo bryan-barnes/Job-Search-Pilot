@@ -237,13 +237,18 @@ def chrome_prompt(p: Packet, job: dict, cfg: dict) -> None:
     letter = read(p.dir / "cover-letter.md").strip()
     answers = read(p.dir / "answers.md").strip()
     profile = read(HOME / "applicant-profile.md").strip()
+    workplace = ("Read the workplace badge under the job title (Remote / Hybrid / On-site). If it says "
+                 "Hybrid or On-site, stop and tell me: I only apply to fully remote jobs."
+                 if agent.remote_only(cfg) else
+                 "Read the workplace badge under the job title (Remote / Hybrid / On-site) and the "
+                 "location, and tell me both. If the posting says it has closed, stop and tell me.")
     (p.dir / "apply-in-chrome.md").write_text(f"""Help me fill out a job application. Don't submit it: I'll review and click Submit myself.
 
 Job: {job.get('role')} at {job.get('company')}
 Posting: {job.get('url')}
 
 Steps:
-1. Open the posting in a new tab. Read the workplace badge under the job title (Remote / Hybrid / On-site). If it says Hybrid or On-site, stop and tell me: I only apply to fully remote jobs. Otherwise click Apply. If it sends you to the employer's site (Workday, Greenhouse, Lever, iCIMS, Hirebridge, etc.), follow it. If it's LinkedIn Easy Apply, use that. If Apply opens a popup that doesn't appear, open that link in this tab instead.
+1. Open the posting in a new tab. {workplace} Otherwise click Apply. If it sends you to the employer's site (Workday, Greenhouse, Lever, iCIMS, Hirebridge, etc.), follow it. If it's LinkedIn Easy Apply, use that. If Apply opens a popup that doesn't appear, open that link in this tab instead.
 2. Sign-in: if the site only asks for my email, use the email in MY PROFILE below. If it asks for a password, a verification code, or to create an account, stop and let me do it. Never type or invent a password.
 3. Resume first. If the form has a resume upload or "autofill from resume", stop right away and ask me to attach {stem}-Resume.pdf before you fill anything, because the parser overwrites fields. Cover letter: if it's a text box, paste the COVER LETTER below; if it's an upload, ask me to attach {stem}-Cover-Letter.pdf at the same time as the resume. Both files (and .docx versions) are in my packet folder: {p.dir}
 4. After the resume is parsed, check the fields it filled (name, contact, work history, education) against MY PROFILE and fix parsing errors.

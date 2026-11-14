@@ -17,8 +17,8 @@ repo holds only the tools and templates, and your own files are never committed 
   Applied → Screen → Interview → Offer). **Add job** takes a posting's link and fills in the
   details. Score each job 1–5 on fit, company, and how much you'd like it, and move it along
   with one click. **Score fit** has your AI read every unscored posting and score Fit against
-  your resume in one go, with a one-line reason. Fully remote jobs only; the rest are kept but
-  hidden.
+  your resume in one go, with a one-line reason. Fully remote jobs only by default (the rest are
+  kept but hidden); if you'd also work hybrid or in person, untick that in **Settings**.
 - **Application packets**: for each job you want, a folder with the saved posting, a one-page
   resume variant, a cover letter, draft form answers, an honest fit check, and a prompt for
   Claude in Chrome that fills the application form and stops before Submit.
@@ -97,7 +97,8 @@ company, and what the posting says about remote work. Check it, then save.
 <img src="docs/images/add-job.png" alt="Add a job: the link, Look up, and the filled-in role, company, location, pay, and remote answer" width="560">
 
 **6. Confirm remote.** Jobs whose posting doesn't clearly say "fully remote" wait in **Check
-remote**. Open the posting, then click Fully remote or Not remote.
+remote**. Open the posting, then click Fully remote or Not remote. (Open to hybrid or in-person
+work? Untick "List fully remote jobs only" in Settings, and this step goes away.)
 
 <img src="docs/images/check-remote.png" alt="Check remote: one job whose remote status needs confirming, with Open posting, Fully remote, and Not remote" width="800">
 
@@ -123,7 +124,8 @@ build**.
 
 1. **Found**: you add it with **Add job** (or the alert feed adds it as New, and you click
    Interested). Paste the employer's own posting link when you can.
-2. **Confirmed remote**: "Check remote" lists jobs you haven't confirmed. Open the posting,
+2. **Confirmed remote** (skipped if you list hybrid and in-person jobs too): "Check remote"
+   lists jobs you haven't confirmed. Open the posting,
    check where the job is worked, and click Fully remote or Not remote. (When you add a job
    yourself and pick "Yes, fully remote", that counts.)
 3. **Packet**: click the job → **Prep application** (or **Prep packets** for several, three at
@@ -145,6 +147,7 @@ tests it:
 |---|---|
 | `agent.runner` | `manual` (paste into any AI chat), `claude`, `codex`, or `opencode`. See `docs/agents.md` |
 | `agent.model` | The model for that runner; `null` = the CLI's own default |
+| `remote_only` | List fully remote jobs only (on by default). Off: remote, hybrid, and in-person jobs are all listed |
 | `permanent_only` | Skip contract/temp/part-time postings (on by default) |
 | `scoring.enabled` | Give new alert jobs a 1–5 fit guess from the title (off by default) |
 | `chrome_path` | Chrome, which prints the PDFs. Found automatically (on Linux, Google Chrome or Chromium) |

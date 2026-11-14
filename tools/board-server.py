@@ -139,6 +139,7 @@ def settings_view() -> dict:
         default_name = ""
     return {
         "runner": agent.runner_name(cfg), "model": agent.model_name(cfg), "runners": runners,
+        "remote_only": agent.remote_only(cfg),
         "permanent_only": bool(cfg.get("permanent_only", True)),
         "scoring": bool(cfg.get("scoring", {}).get("enabled", False)),
         "document_name": cfg.get("document_name") or "", "default_name": default_name,
@@ -240,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "model": agent.model_name(cfg),
                                     "runner_label": agent.RUNNER_INFO.get(
                                         agent.runner_name(cfg), ("?",))[0],
+                                    "remote_only": agent.remote_only(cfg),
                                     "windows": sys.platform == "win32"})
         if path == "/api/packets":
             return self._json(200, packets())
@@ -494,11 +496,12 @@ class Handler(BaseHTTPRequestHandler):
                 cfg.setdefault("agent", {})["model"] = clean_model(body["model"])
         except ValueError as exc:
             return self._json(400, {"error": str(exc)})
-        for key in ("permanent_only", "scoring"):
+        for key in ("remote_only", "permanent_only", "scoring"):
             if key in body and not isinstance(body[key], bool):
                 return self._json(400, {"error": f"{key} must be true or false"})
-        if "permanent_only" in body:
-            cfg["permanent_only"] = body["permanent_only"]
+        for key in ("remote_only", "permanent_only"):
+            if key in body:
+                cfg[key] = body[key]
         if "scoring" in body:
             cfg["scoring"] = {**cfg.get("scoring", {}), "enabled": body["scoring"]}
         if "document_name" in body:

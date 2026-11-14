@@ -334,8 +334,9 @@ def main() -> None:
     state["messages"] = sorted(done | {m["key"] for m in new_msgs})
     STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
     remote_n = sum(j["remote"] == "yes" for j in fresh)
-    log(f"Added {len(fresh)} job(s) to jobs.js as New ({remote_n} fully remote and shown on the "
-        f"board; {len(fresh) - remote_n} hidden). Skipped {len(expired)} closed posting(s) and "
+    shown = (f"shown on the board; {len(fresh) - remote_n} hidden" if agent.remote_only(cfg)
+             else "all shown on the board")
+    log(f"Added {len(fresh)} job(s) to jobs.js as New ({remote_n} fully remote and {shown}). Skipped {len(expired)} closed posting(s) and "
         f"{len(temp)} contract, temporary, or part-time job(s).")
     recheck_open_jobs(today, dry=False)
 

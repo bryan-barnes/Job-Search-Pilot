@@ -103,6 +103,12 @@ def model_name(cfg: dict) -> str | None:
     return cfg.get("agent", {}).get("model") or None
 
 
+def remote_only(cfg: dict) -> bool:
+    """True (the default): the board lists fully remote jobs only. False: remote, hybrid, and
+    in-person jobs are all listed, and the remote field is information only."""
+    return bool(cfg.get("remote_only", True))
+
+
 def save_config(cfg: dict) -> None:
     """Write config.json atomically (the board server and the tools read it at any time)."""
     tmp = CONFIG.with_name(CONFIG.name + ".tmp")

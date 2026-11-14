@@ -18,7 +18,9 @@ its sector or company type**, including startups.
 
 ## Where and how I'll work
 
-Fully remote only: not hybrid, not [your city]. (The board lists fully remote jobs only.)
+[Fully remote only: not hybrid, not [your city].] OR [Remote, hybrid, or in person within
+[distance] of [your city].] (Settings on the board → "List fully remote jobs only" should
+match: on for the first, off for the second.)
 
 [If you want full-time permanent roles only, keep this line and leave `permanent_only` on in
 config.json: no contract, contractor-of-record, temporary, interim, fractional, or part-time

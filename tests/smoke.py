@@ -183,6 +183,7 @@ def main() -> None:
         check(letter.startswith("Dear Hiring Team") and "```" not in letter, "code fence stripped from the letter")
         code, txt = call(f"/api/packet/{jid}/apply-in-chrome.md")
         check(code == 200 and "Zoë" in txt.decode("utf-8"), "Chrome prompt served as UTF-8")
+        check("I only apply to fully remote jobs" in txt.decode("utf-8"), "Chrome prompt stops at hybrid/on-site by default")
 
         step("Score fit (manual mode)")
         code, _ = call("/api/score", {"ids": [jid2]})
@@ -236,7 +237,15 @@ def main() -> None:
               and cfg["permanent_only"] is False and "chrome_path" in cfg, "config.json updated, other keys kept")
         code, info = call("/api/info")
         check(info["runner"] == "codex" and info["model"] == "gpt-test", "board header shows the new AI")
-        call("/api/settings", {"runner": "manual", "model": "", "permanent_only": True})
+        check(info["remote_only"] is True, "remote-only is on by default")
+        code, _ = call("/api/settings", {"remote_only": "no"})
+        check(code == 400, "remote_only that isn't true/false refused")
+        code, res = call("/api/settings", {"remote_only": False})
+        _, info = call("/api/info")
+        check(code == 200 and res["settings"]["remote_only"] is False and info["remote_only"] is False
+              and json.loads((root / "config.json").read_text(encoding="utf-8"))["remote_only"] is False,
+              "remote-only can be turned off (hybrid and in-person jobs listed)")
+        call("/api/settings", {"runner": "manual", "model": "", "permanent_only": True, "remote_only": True})
 
         step("Security")
         req = urllib.request.Request(BASE + "/api/update", method="POST",

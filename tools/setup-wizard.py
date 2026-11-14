@@ -215,7 +215,9 @@ def config_step() -> dict:
         cfg["agent"]["model"] = ask(f"Which model? (blank = whatever {runner} is set to)",
                                     cfg["agent"].get("model") or "") or None
 
-    cfg["permanent_only"] = yn("\nSkip contract, temporary, and part-time postings automatically?",
+    cfg["remote_only"] = yn("\nOnly fully remote jobs? (No = list hybrid and in-person jobs too)",
+                            agent.remote_only(cfg))
+    cfg["permanent_only"] = yn("Skip contract, temporary, and part-time postings automatically?",
                                bool(cfg.get("permanent_only", True)))
     if cfg["agent"]["runner"] != "manual":
         cfg["scoring"] = {"enabled": yn(
@@ -471,14 +473,14 @@ def store_worker_key(cfg: dict) -> str | None:
 
 # ---------- done ----------
 
-def finish() -> None:
+def finish(cfg: dict) -> None:
     banner("You're set up")
     say(f"""
 The day-to-day:
 
   1. Open the board: {how_to_open()}.
   2. Found a job? Click "Add job" and paste the link. (Alert jobs arrive on their own.)
-     Work the New ones: Interested or Not interested. Confirm remote ones ("Check remote").
+     Work the New ones: Interested or Not interested.{' Confirm remote ones ("Check remote").' if agent.remote_only(cfg) else ''}
   3. For a job you want, click it, then "Prep application". Read the fit check first,
      then the letter and resume.
   4. "Copy Chrome prompt", paste it into Claude in Chrome, attach the two PDFs when
@@ -506,7 +508,7 @@ this wizard again any time; it picks up where you left off.""")
     resume_test_step()
     board_step()
     alerts_step(cfg)
-    finish()
+    finish(cfg)
 
 
 if __name__ == "__main__":
