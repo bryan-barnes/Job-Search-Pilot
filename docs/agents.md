@@ -75,9 +75,9 @@ The most flexible: any provider or model you've configured for OpenCode, includi
 - **Mac, a model on another computer on your network** (e.g. a home GPU server): macOS's Local
   Network privacy blocks programs started in the background, such as a board you set up as a
   LaunchAgent, from reaching other computers on your network, and the test says it "can't
-  reach" the server. A board started with `Open Job Board.command` (from Finder or Terminal)
-  isn't affected. Either start it that way, or allow the program under System Settings →
-  Privacy & Security → Local Network if it's listed there.
+  reach" the server. Allowing Python under System Settings → Local Network doesn't help, because
+  the program that connects is the AI CLI, which isn't an app and can't be listed there. A board
+  started with `Open Job Board.command` (double-clicked, or as a Login Item) isn't affected.
 
 The prompt never goes on the command line, because on Windows the CLIs are `.cmd` wrappers and
 a multi-line argument gets cut off there.

@@ -396,8 +396,8 @@ def unreachable_message(out: str) -> str | None:
     if sys.platform == "darwin" and local:
         msg += (" If that computer answers from a terminal, macOS is blocking the board from your "
                 "local network. That happens when the board was started in the background (a "
-                "LaunchAgent): start it with Open Job Board.command instead, or allow it under "
-                "System Settings → Privacy & Security → Local Network.")
+                "LaunchAgent). Start it with Open Job Board.command instead (double-click it, or "
+                "add it to System Settings → General → Login Items).")
     else:
         msg += " Check that it's running and that this computer can reach it."
     return msg

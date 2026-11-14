@@ -63,6 +63,15 @@ press Enter.
 it's from an unidentified developer. The setup wizard clears that for you; if you skipped it,
 right-click the file → Open → Open.
 
+**Start the board when you log in** (optional), so the New jobs from alerts keep arriving:
+- **Mac:** System Settings → General → Login Items → **+** → pick `Open Job Board.command`. Use
+  this, not a LaunchAgent: macOS blocks programs started in the background from reaching other
+  computers on your network, which breaks an AI model running on another machine at home.
+- **Windows:** press Win+R, type `shell:startup`, and put a shortcut to `Open Job Board.bat` in
+  the folder that opens.
+- **Linux:** add `./"Open Job Board.command"` (run from this folder) to your desktop's startup
+  applications.
+
 ## Setup, step by step
 
 These screenshots are from a Mac, with a made-up person (Alex Rivera) and made-up employers.
