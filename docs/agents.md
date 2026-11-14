@@ -72,6 +72,12 @@ The most flexible: any provider or model you've configured for OpenCode, includi
 - If **Test this AI** says it isn't answering but your model server is up, check that the model
   name is right (`opencode models`), and try `opencode run "say hi"` in a terminal to see the
   error. With an OpenCode older than version 2, update it (`npm install -g opencode-ai`).
+- **Mac, a model on another computer on your network** (e.g. a home GPU server): macOS's Local
+  Network privacy blocks programs started in the background, such as a board you set up as a
+  LaunchAgent, from reaching other computers on your network, and the test says it "can't
+  reach" the server. A board started with `Open Job Board.command` (from Finder or Terminal)
+  isn't affected. Either start it that way, or allow the program under System Settings →
+  Privacy & Security → Local Network if it's listed there.
 
 The prompt never goes on the command line, because on Windows the CLIs are `.cmd` wrappers and
 a multi-line argument gets cut off there.

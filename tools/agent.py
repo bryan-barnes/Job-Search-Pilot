@@ -234,6 +234,37 @@ def kill_tree(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
+class GaveUp(Exception):
+    pass
+
+
+def _watch(proc: subprocess.Popen, stdin: bytes, out: Path, timeout: int, give_up: str) -> None:
+    """Wait for a short run, checking its output each second for the give_up pattern."""
+    import time
+    if proc.stdin:
+        try:
+            proc.stdin.write(stdin)
+            proc.stdin.close()
+        except OSError:
+            pass
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            proc.wait(timeout=1)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            tail = out.read_bytes()[-4000:].decode("utf-8", "replace")
+        except OSError:
+            tail = ""
+        m = re.search(give_up, tail)
+        if m:
+            raise GaveUp(m.group(0).strip())
+        if time.monotonic() > deadline:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+
+
 def _span(seconds: int) -> str:
     return f"{seconds} seconds" if seconds < 120 else f"{round(seconds / 60)} minutes"
 
@@ -251,8 +282,12 @@ LOCAL_HINT = "If it uses a model on your own computer or server, check that the 
 TEST_HINT = "Settings → Test this AI checks it."
 
 
-def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800) -> str:
+def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800,
+               give_up: str | None = None) -> str:
     """Run the prompt through the configured agent; output goes to log.
+
+    give_up: a regex; if the agent's output matches it (e.g. it keeps retrying a connection), stop
+    early with NoAnswer instead of waiting for the timeout. Only for short prompts (the test).
 
     Returns the runner used. For "manual" it writes the prompt to cwd/RUN-THIS.md and returns
     "manual" without running anything.
@@ -307,10 +342,15 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
             proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=f,
                                     stderr=subprocess.STDOUT, **group)
             try:
-                proc.communicate(stdin, timeout=timeout)
+                if give_up:
+                    _watch(proc, stdin, transcript or log, timeout, give_up)
+                else:
+                    proc.communicate(stdin, timeout=timeout)
             except BaseException:
                 kill_tree(proc)
                 raise
+    except GaveUp as exc:
+        raise NoAnswer(f"{ai_label(cfg)} gave up: {exc}") from None
     except subprocess.TimeoutExpired:
         raise NoAnswer(f"{ai_label(cfg)} didn't finish within {_span(timeout)}. "
                        + LOCAL_HINT + " " + TEST_HINT) from None
@@ -325,7 +365,7 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
     return runner
 
 
-def ensure_answering(cfg: dict, timeout: int = 180) -> None:
+def ensure_answering(cfg: dict, timeout: int = 60) -> None:
     """Before a long job, make sure the AI answers at all, so an unreachable model fails in a few
     minutes instead of at the long job's time limit. Does nothing in manual mode."""
     if runner_name(cfg) == "manual":
@@ -340,7 +380,30 @@ TEST_PROMPT = ("This is a connection test from Job Search Pilot. Don't read, wri
                "Reply with the sum of 19 and 23, as digits only.")
 
 
-def test_runner(cfg: dict, timeout: int = 240) -> dict:
+# The AI CLI keeps retrying a connection it can't make (OpenCode prints "retrying (attempt N)").
+RETRYING = r"[^\n]*(?:retrying \(attempt [3-9]|[Rr]econnecting\.*\s*[3-9]/)[^\n]*"
+UNREACHABLE = r"(?:Can't reach|Cannot connect to|connect(?:ion)? refused|EHOSTUNREACH|ECONNREFUSED|No route to host)"
+
+
+def unreachable_message(out: str) -> str | None:
+    """A plain explanation when the AI couldn't connect to its model server, else None."""
+    if not re.search(UNREACHABLE, out, re.I):
+        return None
+    m = re.search(r"Can't reach ([\w.-]+)", out)
+    host = m.group(1).rstrip(".") if m else ""
+    msg = f"It can't reach its model server{' at ' + host if host else ''}."
+    local = re.match(r"(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[\w-]+\.local$)", host)
+    if sys.platform == "darwin" and local:
+        msg += (" If that computer answers from a terminal, macOS is blocking the board from your "
+                "local network. That happens when the board was started in the background (a "
+                "LaunchAgent): start it with Open Job Board.command instead, or allow it under "
+                "System Settings → Privacy & Security → Local Network.")
+    else:
+        msg += " Check that it's running and that this computer can reach it."
+    return msg
+
+
+def test_runner(cfg: dict, timeout: int = 60) -> dict:
     """Send a tiny prompt through the configured runner. Returns {ok, message, output}."""
     import time
     runner = runner_name(cfg)
@@ -353,10 +416,11 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
     with scratch_dir("test-") as tmp:
         log = tmp / "test.log"
         try:
-            run_prompt(cfg, TEST_PROMPT, cwd=tmp, log=log, timeout=timeout)
+            run_prompt(cfg, TEST_PROMPT, cwd=tmp, log=log, timeout=timeout, give_up=RETRYING)
             err = None
-        except NoAnswer:
-            err = f"No answer after {_span(timeout)}. {LOCAL_HINT}"
+        except NoAnswer as exc:
+            err = (str(exc) if " gave up: " in str(exc)
+                   else f"No answer after {_span(timeout)}. {LOCAL_HINT}")
         except (RuntimeError, OSError) as exc:
             err = str(exc)
         answer = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
@@ -365,7 +429,9 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
     secs = round(time.monotonic() - t0)
     out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out).strip()
     if err:
-        if re.search(r"401|unauthori[sz]ed|not (logged|signed) in|log ?in|api key|credential", out, re.I):
+        if unreachable_message(out):
+            err = unreachable_message(out)
+        elif re.search(r"401|unauthori[sz]ed|not (logged|signed) in|log ?in|api key|credential", out, re.I):
             err = (f"It isn't signed in yet. Open a terminal, run {runner} once, and sign in. "
                    "Then test again.")
         elif "exited" in err:
