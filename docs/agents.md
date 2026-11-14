@@ -68,6 +68,11 @@ The most flexible: any provider or model you've configured for OpenCode, includi
   is deleted afterwards). `--auto` accepts its file tools; `--archived` keeps the session out
   of your normal list. Its permissions come from your OpenCode config: the prompt needs file
   reads and edits in the packet folder and, for one fallback, webfetch.
+- If **Test this AI** says it isn't answering but your model server is up (e.g. you can reach
+  a local model directly), OpenCode's background service may be stuck. This can happen after
+  the model was unreachable for a while. Restart it, and OpenCode starts a fresh one the next
+  time it's used. On Mac or Linux: `pkill -f "opencode serve"`. On Windows: end the
+  `opencode` processes in Task Manager, or sign out and back in. Then test again.
 
 The prompt never goes on the command line, because on Windows the CLIs are `.cmd` wrappers and
 a multi-line argument gets cut off there.
