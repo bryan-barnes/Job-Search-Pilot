@@ -24,6 +24,7 @@ Nothing is submitted anywhere; you review the packet and apply yourself.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -63,8 +64,9 @@ class Packet:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def status(self, state: str, step: str, **extra) -> None:
+        # pid lets the board tell a live prep from one that died (e.g. the board restarted).
         data = {"state": state, "step": step, "updated": datetime.now().isoformat(timespec="seconds"),
-                **extra}
+                "pid": os.getpid(), **extra}
         (self.dir / "status.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         print(f"[{state}] {step}", flush=True)
 
@@ -327,8 +329,10 @@ def main() -> None:
         p.status("running", f"Checking that {agent.ai_label(cfg)} answers")
         agent.ensure_answering(cfg)
         # Keep the last version of anything we're about to regenerate (you may have edited it).
+        # Any of the agent's files counts: a failed try can leave some but not all of them, and a
+        # leftover one would hide that this try didn't write it.
         old = [f for f in p.dir.iterdir() if f.is_file() and f.name not in ("status.json", "prep.log")]
-        if any(f.name == "cover-letter.md" for f in old):
+        if any(f.name in WRITES for f in old):
             keep = p.dir / "previous" / datetime.now().strftime("%Y-%m-%d-%H%M%S")
             keep.mkdir(parents=True)
             for f in old:

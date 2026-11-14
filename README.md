@@ -113,7 +113,8 @@ work? Untick "List fully remote jobs only" in Settings, and this step goes away.
 
 **7. Score fit.** **Score fit** has your AI read each posting and score Fit 1 to 5 against your
 resume, with a one-line reason in the notes, including what's missing. Company and Me are
-your own scores.
+your own scores. **Re-score fit** scores every job you haven't applied to again, for example
+after switching to a stronger AI in Settings.
 
 <img src="docs/images/job-scored.png" alt="A job with Fit 4 from the AI and its reason in the notes" width="560">
 
@@ -138,7 +139,7 @@ build**.
    check where the job is worked, and click Fully remote or Not remote. (When you add a job
    yourself and pick "Yes, fully remote", that counts.)
 3. **Packet**: click the job → **Prep application** (or **Prep packets** for several, three at
-   a time). Read the fit check first, then the letter and resume. To change wording, edit the
+   a time; packets that failed are offered there again). Read the fit check first, then the letter and resume. To change wording, edit the
    .md files in the packet folder and click **Rebuild documents**.
 4. **Apply**: **Copy Chrome prompt**, paste it into Claude in Chrome, attach the PDFs when it
    asks, and let it fill the form. It stops before Submit; you submit, then **Mark applied**.

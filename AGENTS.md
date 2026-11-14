@@ -39,7 +39,9 @@ The tools create any missing file from `templates/` the first time they run.
   interested (→ passed), Posting expired (→ expired), Mark applied, the next stage (Screen,
   Interview, Offer), Not selected (→ rejected), Not fully remote / Confirmed remote, the
   three 1–5 scores, and **Score fit (N)**, which runs `tools/fitscore.py` to have the configured
-  agent score Fit for every listed, unscored job from its posting (the reason goes in `notes`).
+  agent score Fit for every listed, unscored job from its posting (the reason goes in `notes`,
+  naming the AI). **Re-score fit** does the same for every listed job not applied to, replacing
+  existing Fit scores (e.g. to have a stronger AI redo the local model's scores).
   An optional reason is added to `notes`. **Check for new jobs** runs `tools/ingest-alerts.py`
   now when LinkedIn alerts are set up; the board server also runs it every 3 hours between 8am
   and 10pm (output in `ingest.log`). **Settings** edits `config.json` (which AI runs, its
@@ -96,8 +98,9 @@ Each job they apply to gets a packet in `applications/<job-id>/`.
    active jobs whose remote status they haven't confirmed. They open the posting, come back,
    and click Fully remote or Not remote, which sets `remote` and `remoteChecked`.
 2. **Prep.** **Prep packets (N)** on the board lists every job that isn't applied to and has no
-   packet (and, with `remote_only` on, is confirmed fully remote); the server queues the ticked
-   ones, 3 at a time. For a single job, the dialog's "Prep application" button runs `tools/prep-application.py <job-id>`, which
+   packet or a failed one (and, with `remote_only` on, is confirmed fully remote); the server
+   queues the ticked ones, 3 at a time. A packet whose process is gone (the board restarted, or
+   the AI quit) shows as failed, so it can be queued again. For a single job, the dialog's "Prep application" button runs `tools/prep-application.py <job-id>`, which
    saves the posting to `posting.md`, then runs the configured agent (config.json →
    `agent.runner`: `manual`, `claude`, `codex`, or `opencode`; see `docs/agents.md`) with
    `tools/application-prompt.md` to write `resume.md`, `cover-letter.md`, `answers.md`, and

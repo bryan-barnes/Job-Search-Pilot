@@ -152,6 +152,7 @@ textarea { min-height: 84px; resize: vertical; }
       <button type="button" class="btn small" id="checkBtn" hidden></button>
       <button type="button" class="btn small" id="prepBtn" hidden></button>
       <button type="button" class="btn small" id="scoreBtn" hidden title="Ask your AI to score Fit 1-5 from each posting"></button>
+      <button type="button" class="linkbtn" id="rescoreBtn" hidden title="Ask your AI to score Fit again for every listed job you haven't applied to, replacing the current scores"></button>
       <button type="button" class="btn small" id="scorePasteBtn" hidden>Paste AI scores</button>
       <span class="score-line" id="scoreLine" role="status"></span></span>
     <label for="sortSel">Sort
@@ -387,15 +388,18 @@ const remoteOnly = () => info.remote_only !== false;
 const isRemote = (j) => j.remote === "yes";
 // Anything the auto-check decided (remote, hybrid, or unsure) waits for you to confirm it.
 const needsCheck = (j) => remoteOnly() && j.status !== "expired" && ACTIVE.has(j.status || "found") && !j.remoteChecked && editable(j);
-// Ready for a packet: not applied yet, no packet yet, and (remote-only) remote confirmed by you.
-const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && (!remoteOnly() || (j.remote === "yes" && !!j.remoteChecked)) && !packets[j.id] && editable(j);
+// Ready for a packet: not applied yet, no packet yet or its last try failed, and (remote-only)
+// remote confirmed by you.
+const prepFailed = (j) => packets[j.id]?.state === "failed";
+const prepReady = (j) => NOT_APPLIED.has(j.status || "found") && (!remoteOnly() || (j.remote === "yes" && !!j.remoteChecked)) && (!packets[j.id] || prepFailed(j)) && editable(j);
 const visible = (j) => j.status !== "expired" && (showHidden || !remoteOnly() || isRemote(j));
 const inStage = (j, k) => k === "active" ? ACTIVE.has(j.status || "found") : (j.status || "found") === k;
 const $ = (id) => document.getElementById(id);
 const today = () => new Date(new Date().toDateString());
 const days = (iso) => iso ? Math.floor((today() - new Date(iso + "T00:00:00")) / 864e5) : null;
 // Jobs the Score fit button covers: listed, not applied yet, no Fit score.
-const scoreReady = (j) => visible(j) && NOT_APPLIED.has(j.status || "found") && !j.fit && editable(j);
+const rescoreReady = (j) => visible(j) && NOT_APPLIED.has(j.status || "found") && editable(j);
+const scoreReady = (j) => rescoreReady(j) && !j.fit;
 const total = (j) => (j.fit || 0) + (j.co || 0) + (j.like || 0);
 const rated = (j) => [j.fit, j.co, j.like].filter(Boolean).length;
 const editable = (j) => !info.editable || info.editable.includes(j.id);
@@ -494,7 +498,11 @@ function renderPrepBar(rows) {
   if (!on) return;
   const n = rows.filter((j) => prepPicked.has(j.id)).length;
   const waiting = jobs.filter((j) => needsCheck(j) && j.remote === "yes").length;
-  $("prepIntro").textContent = `These jobs ${remoteOnly() ? "are confirmed fully remote and " : ""}have no packet yet. Untick any you'd skip. Packets build three at a time, a few minutes each, and the jobs move to Applying.`
+  const retry = rows.filter(prepFailed).length;
+  $("prepIntro").textContent = `These jobs ${remoteOnly() ? "are confirmed fully remote and " : ""}have no packet yet`
+    + (retry ? `, or their last try failed (${retry}, marked Packet failed; trying again keeps any earlier files in the packet's previous/ folder)` : "")
+    + `. Untick any you'd skip. Packets build three at a time, a few minutes each, and the jobs move to Applying.`
+    + (info.runner_label ? ` Written by: ${info.runner_label}${info.model ? " · " + info.model : ""} (change it in Settings).` : "")
     + (waiting ? ` ${waiting} more remote job${waiting === 1 ? " still needs" : "s still need"} a remote check first.` : "");
   $("prepGo").textContent = n ? `Prep ${n} packet${n === 1 ? "" : "s"}` : "Nothing ticked";
   $("prepGo").disabled = !n;
@@ -520,12 +528,15 @@ function renderList() {
   $("checkBtn").textContent = checking ? "Done checking" : `Check remote (${toCheck})`;
   $("checkBtn").setAttribute("aria-pressed", String(checking));
   $("checkIntro").hidden = !checking;
-  const ready = jobs.filter(prepReady).length;
+  const ready = jobs.filter(prepReady).length, failed = jobs.filter((j) => prepReady(j) && prepFailed(j)).length;
   $("prepBtn").hidden = !EDITABLE || prepping || checking || !ready;
-  $("prepBtn").textContent = `Prep packets (${ready})`;
-  const toScore = jobs.filter(scoreReady).length;
+  $("prepBtn").textContent = `Prep packets (${ready})` + (failed ? ` · ${failed} to retry` : "");
+  const toScore = jobs.filter(scoreReady).length, toRescore = jobs.filter(rescoreReady).length;
   $("scoreBtn").hidden = !EDITABLE || prepping || checking || !toScore || scoring;
   $("scoreBtn").textContent = `Score fit (${toScore})`;
+  // Re-score covers the jobs already scored too (e.g. by a different AI).
+  $("rescoreBtn").hidden = !EDITABLE || prepping || checking || scoring || toRescore <= toScore;
+  $("rescoreBtn").textContent = toScore ? `· re-score all ${toRescore}` : `Re-score fit (${toRescore})`;
   renderPrepBar(rows);
   if (!rows.length) {
     const empty = el("div", "empty", checking ? "All checked. Nice." : prepping ? (remoteOnly() ? "No confirmed remote jobs are waiting for a packet." : "No jobs are waiting for a packet.") : shown.length ? "No jobs at this stage." : "No jobs yet.");
@@ -824,11 +835,17 @@ function openScoreDlg(s) {
   $("sLine").textContent = s.step || ""; $("sReply").value = ""; $("sStatus").textContent = "";
   $("scoreDlg").showModal();
 }
-$("scoreBtn").onclick = async () => {
-  const ids = jobs.filter(scoreReady).map((j) => j.id);
+async function startScore(ids) {
   if (info.runner === "manual" && ids.length > 15 && !confirm(`Manual mode scores 15 at a time. Score the first 15 of ${ids.length} now?`)) return;
-  try { await post("/api/score", { ids }); scoring = true; $("scoreLine").textContent = "Scoring fit: starting…"; renderList(); loadScore(true); }
+  try { await post("/api/score", { ids: ids.slice(0, 200) }); scoring = true; $("scoreLine").textContent = "Scoring fit: starting…"; renderList(); loadScore(true); }
   catch (e) { $("scoreLine").textContent = e.message; }
+}
+$("scoreBtn").onclick = () => startScore(jobs.filter(scoreReady).map((j) => j.id));
+$("rescoreBtn").onclick = () => {
+  const ids = jobs.filter(rescoreReady).map((j) => j.id);
+  const ai = info.runner_label ? `${info.runner_label}${info.model ? " (" + info.model + ")" : ""}` : "your AI";
+  if (!confirm(`Score Fit again for all ${ids.length} listed jobs you haven't applied to, using ${ai}? This replaces their current Fit scores, including any you set yourself. Company and Me scores aren't touched.`)) return;
+  startScore(ids);
 };
 $("sClose").onclick = () => $("scoreDlg").close();
 $("sCopy").onclick = async () => {

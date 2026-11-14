@@ -570,7 +570,39 @@ def prep_problem(job_id) -> tuple[int, str] | None:
         return 404, "No such job"
     if (job_id in running and running[job_id].poll() is None) or job_id in prep_queue:
         return 409, "Already preparing this one"
+    # A prep that outlived a board restart is still writing; don't start a second one beside it.
+    try:
+        data = json.loads((APPS / job_id / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if data and packet_view(job_id, data).get("state") == "running":
+        return 409, "Already preparing this one"
     return None
+
+
+def pid_alive(pid) -> bool:
+    """Whether process `pid` is still running (Mac, Linux, and Windows)."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+        k32.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def write_status(job_id: str, state: str, step: str) -> None:
@@ -628,22 +660,35 @@ def packets() -> dict:
         except (OSError, ValueError):
             continue
         job_id = f.parent.name
-        proc = running.get(job_id)
-        if data.get("state") == "running" and (proc is None or proc.poll() is not None):
-            # The prep process ended without reporting (crash or server restart). A prep the
-            # board didn't start (it survived a restart) gets 45 minutes before it counts as dead.
-            try:
-                stale = time.time() - datetime.fromisoformat(data.get("updated", "")).timestamp() > 2700
-            except ValueError:
-                stale = True
-            if proc is not None or stale or data.get("step") in ("Starting", "Building documents"):
-                data = {**data, "state": "failed", "step": "Stopped unexpectedly; see prep.log or build.log"}
-        if data.get("state") == "queued" and job_id not in prep_queue:
-            data = {**data, "state": "failed", "step": "The board restarted before this one ran; click Try again"}
+        data = packet_view(job_id, data)
         data["files"] = sorted(x.name for x in f.parent.iterdir()
                                if x.is_file() and x.suffix in (".md", ".pdf", ".docx"))
         out[job_id] = data
     return out
+
+
+def packet_view(job_id: str, data: dict) -> dict:
+    """A packet's status.json as the board should show it: a "running" or "queued" packet whose
+    process is gone (it crashed, or the board restarted) shows as failed, so it can be retried."""
+    proc = running.get(job_id)
+    if data.get("state") == "running" and (proc is None or proc.poll() is not None):
+        if proc is None and "pid" in data:
+            # Started by an earlier run of the board: its process id says whether it's alive.
+            dead = not pid_alive(data["pid"])
+        else:
+            # No process id (older packets): give it 45 minutes before it counts as dead.
+            try:
+                dead = time.time() - datetime.fromisoformat(data.get("updated", "")).timestamp() > 2700
+            except ValueError:
+                dead = True
+            dead = dead or proc is not None or data.get("step") in ("Starting", "Building documents")
+        if dead:
+            data = {**data, "state": "failed",
+                    "step": "Stopped before it finished (the board restarted, or the AI quit); see "
+                            "prep.log or build.log"}
+    if data.get("state") == "queued" and job_id not in prep_queue:
+        data = {**data, "state": "failed", "step": "The board restarted before this one ran"}
+    return data
 
 
 def main() -> None:

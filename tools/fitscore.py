@@ -109,8 +109,9 @@ def prompt(cfg: dict, jobs: list[dict], manual: bool = False) -> str:
         f"{candidate(cfg)}\n\n=== THE JOBS ===\n\n{listing}\n")
 
 
-def apply_results(results: list[dict], allowed: set[str]) -> list[str]:
-    """Write fit + the reason for each result whose id is in `allowed`. Returns the ids scored."""
+def apply_results(results: list[dict], allowed: set[str], by: str = "AI") -> list[str]:
+    """Write fit + the reason for each result whose id is in `allowed`. Returns the ids scored.
+    `by` names the AI in the note, so scores from different AIs can be told apart."""
     today = date.today().isoformat()
     clean = []
     for r in results:
@@ -130,7 +131,7 @@ def apply_results(results: list[dict], allowed: set[str]) -> list[str]:
         for jid, fit, why in clean:
             if jid in have:
                 text = jobsfile.set_field(text, jid, "fit", fit)
-                text = jobsfile.add_note(text, jid, f"Fit {fit}/5 (AI, from the posting, {today})"
+                text = jobsfile.add_note(text, jid, f"Fit {fit}/5 ({by}, from the posting, {today})"
                                                     + (f": {why}" if why else "."))
         return jobsfile.touch(text, today)
     jobsfile.update(change)
@@ -200,7 +201,7 @@ def main() -> None:
                                        + str(exc)) from None
                 out = (tmp / "score.log").read_text(encoding="utf-8", errors="replace")
             results = agent.extract_json_results(out) or []
-            scored += len(apply_results(results, {j["id"] for j in batch}))
+            scored += len(apply_results(results, {j["id"] for j in batch}, by=f"AI: {agent.ai_label(cfg)}"))
         status("done", f"Scored {scored} of {len(jobs)} job(s)", scored=scored, total=len(jobs))
     except Exception as exc:  # noqa: BLE001
         status("failed", str(exc)[:300])
