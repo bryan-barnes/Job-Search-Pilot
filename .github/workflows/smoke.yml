@@ -32,3 +32,11 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Smoke test
         run: python tests/smoke.py
+      - name: Launcher starts the board (Linux)
+        if: runner.os == 'Linux'
+        env:
+          JOB_BOARD_PORT: "8798"
+        run: |
+          ./"Open Job Board.command"
+          curl -sf http://127.0.0.1:8798/api/info
+          pkill -f board-server.py || true

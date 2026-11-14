@@ -7,7 +7,7 @@ everything; nothing is ever submitted without you.
 
 <img src="docs/images/board.png" alt="The job board: jobs ranked by score, with stage counts, Add job, and Settings" width="800">
 
-Runs on **Mac and Windows**. Your resume, jobs, and applications stay on your computer: the
+Runs on **Mac, Windows, and Linux**. Your resume, jobs, and applications stay on your computer: the
 repo holds only the tools and templates, and your own files are never committed (so you can
 `git pull` updates any time without conflicts).
 
@@ -41,7 +41,7 @@ repo holds only the tools and templates, and your own files are never committed 
    install anything missing, sets up your settings, makes your own copies of the files to fill
    in, test-builds your resume, and opens the board.
 
-   | Mac (Terminal) | Windows (Command Prompt or PowerShell) |
+   | Mac or Linux (Terminal) | Windows (Command Prompt or PowerShell) |
    |---|---|
    | `cd` into the folder, then `python3 tools/setup-wizard.py` | `cd` into the folder, then `py tools\setup-wizard.py` |
 
@@ -51,7 +51,7 @@ repo holds only the tools and templates, and your own files are never committed 
    floor and voice) matter most. Then `applicant-profile.md`, `canned-answers.md`, and
    `experience-bank.md`.
 4. **Open the board**: double-click `Open Job Board.command` (Mac) or `Open Job Board.bat`
-   (Windows). It opens http://127.0.0.1:8765/ in your browser. Click **Add job** and paste a
+   (Windows); on Linux, run `./"Open Job Board.command"` in a terminal. It opens http://127.0.0.1:8765/ in your browser. Click **Add job** and paste a
    posting's link. **Settings** (top right) shows which AI writes your packets and lets you
    switch (copy and paste, Claude Code, Codex for ChatGPT users, or OpenCode) and test it.
 
@@ -81,7 +81,7 @@ resume, which has to fit on one page.
 <img src="docs/images/wizard-2.png" alt="Setup wizard steps 4 and 5: your files, then a test build of the resume to a one-page PDF" width="640">
 
 **3. Start the board.** The wizard starts it; after that, double-click `Open Job Board.command`
-(Mac) or `Open Job Board.bat` (Windows). LinkedIn alerts are optional and can be set up later.
+(Mac) or `Open Job Board.bat` (Windows), or run `./"Open Job Board.command"` (Linux). LinkedIn alerts are optional and can be set up later.
 
 <img src="docs/images/wizard-3.png" alt="Setup wizard steps 6 and 7: the board starts; LinkedIn alerts skipped for now" width="640">
 
@@ -147,7 +147,7 @@ tests it:
 | `agent.model` | The model for that runner; `null` = the CLI's own default |
 | `permanent_only` | Skip contract/temp/part-time postings (on by default) |
 | `scoring.enabled` | Give new alert jobs a 1–5 fit guess from the title (off by default) |
-| `chrome_path` | Chrome, which prints the PDFs. Found automatically on Mac and Windows |
+| `chrome_path` | Chrome, which prints the PDFs. Found automatically (on Linux, Google Chrome or Chromium) |
 | `worker_url`, `worker_token` | Your LinkedIn alerts Worker, if you set one up (the wizard fills these in; on a Mac the key goes in the Keychain instead) |
 | `resume_master` | The master resume, default `resume/master.md` (it can live elsewhere, e.g. `~/Documents/site/resume.md`) |
 | `document_name` | The name on your PDF and Word file names, if not the resume's first line (e.g. `"Alex Doe"` gives `Alex-Doe-Resume.pdf`) |
@@ -176,7 +176,7 @@ tests it:
 |---|---|
 | `AGENTS.md`, `CLAUDE.md` | The rules any AI agent working in this folder follows |
 | `tracker.html` | The board |
-| `Open Job Board.command` / `.bat` | Start the board (Mac / Windows) |
+| `Open Job Board.command` / `.bat` | Start the board (Mac and Linux / Windows) |
 | `tools/setup-wizard.py` | The setup wizard |
 | `tools/board-server.py` | Serves the board on 127.0.0.1:8765 and saves its buttons to `jobs.js` |
 | `tools/prep-application.py` | Builds one application packet |
@@ -191,7 +191,7 @@ tests it:
 | `tools/job-alerts-worker/worker.js` | The Cloudflare Email Worker that stores the alert emails |
 | `templates/` | The starting copies of your files |
 | `docs/` | `agents.md` (the AI runners), `linkedin-alerts.md` (the alert feed), `windows.md` |
-| `tests/smoke.py` | End-to-end test; runs on Mac and Windows in CI |
+| `tests/smoke.py` | End-to-end test; runs on Mac, Windows, and Linux in CI |
 
 ## Updating
 

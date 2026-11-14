@@ -115,6 +115,9 @@ def node_install_hint() -> str:
         return "winget install OpenJS.NodeJS.LTS   (or the LTS installer from https://nodejs.org)"
     if IS_MAC and have("brew"):
         return "brew install node"
+    if not IS_MAC:
+        return ("install Node.js 18 or newer from https://nodejs.org/en/download (Ubuntu 24.04 "
+                "or newer: sudo apt install nodejs npm; older releases ship a Node that's too old)")
     return "download the LTS installer from https://nodejs.org and run it"
 
 
@@ -125,7 +128,8 @@ def check_tools() -> dict:
                                                  "install Python 3.9 or newer from https://python.org"),
         "Node.js": (have("node") is not None, node_install_hint()),
         "Google Chrome": (agent.find_chrome() is not None,
-                          "download it from https://google.com/chrome and run the installer"),
+                          "download it from https://google.com/chrome and run the installer"
+                          + ("" if IS_WIN or IS_MAC else " (Chromium works too)")),
     }
 
 
@@ -300,6 +304,14 @@ def resume_test_step() -> None:
 
 # ---------- 6. the board ----------
 
+def how_to_open() -> str:
+    if IS_WIN:
+        return 'double-click "Open Job Board.bat"'
+    if IS_MAC:
+        return 'double-click "Open Job Board.command"'
+    return 'run  ./"Open Job Board.command"  in a terminal'
+
+
 def board_up() -> bool:
     try:
         with urllib.request.urlopen(BOARD, timeout=2) as r:
@@ -310,11 +322,12 @@ def board_up() -> bool:
 
 def board_step() -> None:
     banner("6. The job board")
-    if IS_MAC:
+    if not IS_WIN:
         # A downloaded ZIP marks the launcher as "from the internet", and macOS refuses to
         # double-click it. Clear that, and make sure it's executable.
         launcher = HOME / "Open Job Board.command"
-        subprocess.run(["xattr", "-d", "com.apple.quarantine", str(launcher)], capture_output=True)
+        if IS_MAC:
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", str(launcher)], capture_output=True)
         launcher.chmod(0o755)
     if board_up():
         say(f"The board is already running at {BOARD}")
@@ -338,8 +351,7 @@ def board_step() -> None:
         say("It's up.")
     if yn("Open it in your browser now?", not AUTO_YES):
         webbrowser.open(BOARD)
-    launcher = "Open Job Board.bat" if IS_WIN else "Open Job Board.command"
-    say(f"\nFrom now on, double-click \"{launcher}\" in this folder to open the board.\n"
+    say(f"\nFrom now on, {how_to_open()} in this folder to open the board.\n"
         "Start with \"Add job\": paste a posting's link and it fills in the details.")
 
 
@@ -461,11 +473,10 @@ def store_worker_key(cfg: dict) -> str | None:
 
 def finish() -> None:
     banner("You're set up")
-    launcher = "Open Job Board.bat" if IS_WIN else "Open Job Board.command"
     say(f"""
 The day-to-day:
 
-  1. Open the board: double-click "{launcher}".
+  1. Open the board: {how_to_open()}.
   2. Found a job? Click "Add job" and paste the link. (Alert jobs arrive on their own.)
      Work the New ones: Interested or Not interested. Confirm remote ones ("Check remote").
   3. For a job you want, click it, then "Prep application". Read the fit check first,
@@ -486,7 +497,7 @@ def main() -> None:
     say("""
 This walks you through the whole setup, step by step. You can skip any step and run
 this wizard again any time; it picks up where you left off.""")
-    say(f"Computer: {'Windows' if IS_WIN else 'Mac' if IS_MAC else sys.platform}")
+    say(f"Computer: {'Windows' if IS_WIN else 'Mac' if IS_MAC else 'Linux' if sys.platform.startswith('linux') else sys.platform}")
     agent.ensure_personal_files()
     install_step()
     npm_step()

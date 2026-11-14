@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Rebuild the one-page master resume (.docx + .pdf) from resume/master.md and report the
-page count. Works on Mac and Windows.
+page count. Works on Mac, Windows, and Linux.
 
 Usage:  python3 tools/rebuild-resume.py        (Windows: python tools\\rebuild-resume.py)
 
