@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-import tempfile
 import time
 from datetime import date
 from email import message_from_bytes, policy
@@ -132,8 +131,7 @@ def agent_score(cfg: dict, jobs: list[dict], master: Path) -> dict[str, dict]:
         f"Listings (id | title | company | location):\n{listing}\n\n"
         "=== MASTER RESUME ===\n" + master.read_text(encoding="utf-8-sig")
     )
-    with tempfile.TemporaryDirectory(prefix="score-") as tmp:
-        tmp = Path(tmp)
+    with agent.scratch_dir("score-") as tmp:
         agent.run_prompt(cfg, prompt, cwd=tmp, log=tmp / "score.log")
         text = (tmp / "score.log").read_text(encoding="utf-8", errors="replace")
     out = {}

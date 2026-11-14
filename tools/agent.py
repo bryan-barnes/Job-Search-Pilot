@@ -13,12 +13,15 @@ and the prompts tell it to work only there. Nothing here talks to an LLM API dir
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -203,6 +206,34 @@ def check(cfg: dict) -> str | None:
     return None
 
 
+@contextlib.contextmanager
+def scratch_dir(prefix: str = "jsp-"):
+    """A temporary folder that never fails on cleanup (on Windows a file can stay locked a moment
+    after the program that wrote it was stopped)."""
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    """Stop an agent and everything it started. On Windows the CLIs are .cmd wrappers around
+    node, and killing the wrapper alone leaves node running."""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def _span(seconds: int) -> str:
     return f"{seconds} seconds" if seconds < 120 else f"{round(seconds / 60)} minutes"
 
@@ -265,10 +296,17 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
         if model:
             cmd += ["--model", model]
         stdin = prompt_bytes
+    # Its own process group (Mac/Linux), so a timeout or Ctrl+C stops everything it started.
+    group = {} if sys.platform == "win32" else {"start_new_session": True}
     try:
         with open(transcript or log, "wb") as f:
-            r = subprocess.run(cmd, cwd=cwd, input=stdin,
-                               stdout=f, stderr=subprocess.STDOUT, timeout=timeout)
+            proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=f,
+                                    stderr=subprocess.STDOUT, **group)
+            try:
+                proc.communicate(stdin, timeout=timeout)
+            except BaseException:
+                kill_tree(proc)
+                raise
     except subprocess.TimeoutExpired:
         raise NoAnswer(f"{ai_label(cfg)} didn't finish within {_span(timeout)}. "
                        + LOCAL_HINT + " " + TEST_HINT) from None
@@ -278,8 +316,8 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
             last = cwd / ".codex-last.txt"
             log.write_bytes(last.read_bytes() if last.is_file() else b"")
             last.unlink(missing_ok=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"{runner} exited {r.returncode}; see {(transcript or log).name}")
+    if proc.returncode != 0:
+        raise RuntimeError(f"{runner} exited {proc.returncode}; see {(transcript or log).name}")
     return runner
 
 
@@ -300,7 +338,6 @@ TEST_PROMPT = ("This is a connection test from Job Search Pilot. Don't read, wri
 
 def test_runner(cfg: dict, timeout: int = 240) -> dict:
     """Send a tiny prompt through the configured runner. Returns {ok, message, output}."""
-    import tempfile
     import time
     runner = runner_name(cfg)
     if runner == "manual":
@@ -309,10 +346,10 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
     if problem:
         return {"ok": False, "message": problem, "output": ""}
     t0 = time.monotonic()
-    with tempfile.TemporaryDirectory() as tmp:
-        log = Path(tmp) / "test.log"
+    with scratch_dir("test-") as tmp:
+        log = tmp / "test.log"
         try:
-            run_prompt(cfg, TEST_PROMPT, cwd=Path(tmp), log=log, timeout=timeout)
+            run_prompt(cfg, TEST_PROMPT, cwd=tmp, log=log, timeout=timeout)
             err = None
         except NoAnswer:
             err = f"No answer after {_span(timeout)}. {LOCAL_HINT}"
@@ -320,7 +357,7 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
             err = str(exc)
         answer = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
         out = "".join(f.read_text(encoding="utf-8", errors="replace")
-                      for f in sorted(Path(tmp).glob("*.log")))
+                      for f in sorted(tmp.glob("*.log")))
     secs = round(time.monotonic() - t0)
     out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out).strip()
     if err:

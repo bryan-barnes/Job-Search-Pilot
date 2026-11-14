@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-import tempfile
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -193,8 +192,7 @@ def main() -> None:
         for i in range(0, len(jobs), BATCH):
             batch = jobs[i:i + BATCH]
             status("running", f"Scoring {i + 1}-{i + len(batch)} of {len(jobs)}", done=scored, total=len(jobs))
-            with tempfile.TemporaryDirectory(prefix="fit-") as tmp:
-                tmp = Path(tmp)
+            with agent.scratch_dir("fit-") as tmp:
                 try:
                     agent.run_prompt(cfg, prompt(cfg, batch), cwd=tmp, log=tmp / "score.log", timeout=900)
                 except Exception as exc:  # noqa: BLE001
