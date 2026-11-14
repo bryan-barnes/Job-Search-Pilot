@@ -274,6 +274,10 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
         (cwd / "PROMPT.md").write_bytes(prompt_bytes)
         # An absolute path: opencode resolves --file from its own service, not from cwd.
         cmd = [exe, "run", "--auto", "--archived", "--file", str((cwd / "PROMPT.md").resolve())]
+        if opencode_standalone(exe):
+            # A private server for this run. OpenCode 2's shared background service can get stuck
+            # (e.g. after its model was unreachable), and then every run waits forever.
+            cmd.insert(2, "--standalone")
         if model:
             cmd += ["--model", model]
         cmd.append("Follow the instructions in the attached file PROMPT.md.")
@@ -371,6 +375,21 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
         return {"ok": False, "message": f"It ran ({secs}s) but didn't answer the test question. "
                 "Check that you're logged in and the model name is right.", "output": out[-1500:]}
     return {"ok": True, "message": f"Working: it answered in {secs} seconds.", "output": out[-600:]}
+
+
+_standalone: dict[str, bool] = {}
+
+
+def opencode_standalone(exe: str) -> bool:
+    """Whether this OpenCode has --standalone (version 2 and later; older ones have no service)."""
+    if exe not in _standalone:
+        try:
+            r = subprocess.run([exe, "run", "--help"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=30)
+            _standalone[exe] = "--standalone" in (r.stdout + r.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            _standalone[exe] = False
+    return _standalone[exe]
 
 
 def opencode_models(cfg: dict) -> list[str]:

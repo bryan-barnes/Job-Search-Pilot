@@ -63,16 +63,15 @@ The most flexible: any provider or model you've configured for OpenCode, includi
   once to set up your provider.
 - Config: `agent.runner: "opencode"`, and `agent.model`: `null` uses whatever OpenCode is
   configured with, or a specific `provider/model` ID (run `opencode models` to list them).
-- How it runs: `opencode run --auto --archived --file PROMPT.md "Follow the instructions in the
-  attached file PROMPT.md."` with the packet folder as the working directory (the prompt file
+- How it runs: `opencode run [--standalone] --auto --archived --file PROMPT.md "Follow the
+  instructions in the attached file PROMPT.md."` with the packet folder as the working directory (the prompt file
   is deleted afterwards). `--auto` accepts its file tools; `--archived` keeps the session out
-  of your normal list. Its permissions come from your OpenCode config: the prompt needs file
+  of your normal list. `--standalone` (OpenCode 2 and later) gives each run its own private
+  server instead of OpenCode's shared background service, which can get stuck. Its permissions come from your OpenCode config: the prompt needs file
   reads and edits in the packet folder and, for one fallback, webfetch.
-- If **Test this AI** says it isn't answering but your model server is up (e.g. you can reach
-  a local model directly), OpenCode's background service may be stuck. This can happen after
-  the model was unreachable for a while. Restart it, and OpenCode starts a fresh one the next
-  time it's used. On Mac or Linux: `pkill -f "opencode serve"`. On Windows: end the
-  `opencode` processes in Task Manager, or sign out and back in. Then test again.
+- If **Test this AI** says it isn't answering but your model server is up, check that the model
+  name is right (`opencode models`), and try `opencode run "say hi"` in a terminal to see the
+  error. With an OpenCode older than version 2, update it (`npm install -g opencode-ai`).
 
 The prompt never goes on the command line, because on Windows the CLIs are `.cmd` wrappers and
 a multi-line argument gets cut off there.
