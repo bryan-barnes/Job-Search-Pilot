@@ -80,13 +80,14 @@ def main() -> None:
     fakebin.mkdir()
     if os.name == "nt":
         (fakebin / "codex.cmd").write_text(
-            '@echo off\r\nif not "%~1"=="exec" exit /b 3\r\n:loop\r\nif "%~1"=="" goto done\r\n'
+            '@echo off\r\nif not "%~1"=="exec" exit /b 3\r\n'
+            'if defined FAKE_CODEX_HANG ping -n 30 127.0.0.1 > nul\r\n:loop\r\nif "%~1"=="" goto done\r\n'
             'if "%~1"=="--output-last-message" set "OUT=%~2"\r\nshift\r\ngoto loop\r\n:done\r\n'
             'more > nul\r\necho transcript: tokens used 4,200\r\nif defined OUT >"%OUT%" echo 42\r\n',
             encoding="utf-8")
     else:
         fake = fakebin / "codex"
-        fake.write_text('#!/bin/sh\n[ "$1" = exec ] || exit 3\nout=""\n'
+        fake.write_text('#!/bin/sh\n[ "$1" = exec ] || exit 3\n[ -n "$FAKE_CODEX_HANG" ] && sleep 30\nout=""\n'
                         'while [ $# -gt 0 ]; do [ "$1" = --output-last-message ] && out="$2"; shift; done\n'
                         'cat >/dev/null\necho "transcript: tokens used 4,200"\n'
                         '[ -n "$out" ] && echo 42 > "$out"\nexit 0\n', encoding="utf-8")
@@ -229,6 +230,15 @@ def main() -> None:
         check(code == 400, "Chrome path that isn't Chrome refused")
         code, res = call("/api/test-agent", {"runner": "codex", "model": "gpt-test"})
         check(code == 200 and res["ok"], f"codex test answers through stdin and -o {res}")
+        # A model that never answers (e.g. a local one that's switched off) fails fast and says so.
+        t0 = time.monotonic()
+        r = subprocess.run(PY + ["-I", "-c", "import sys; sys.path.insert(0, 'tools'); import agent\n"
+                                 "try: agent.ensure_answering({'agent': {'runner': 'codex'}}, timeout=3)\n"
+                                 "except RuntimeError as e: print(e)"],
+                           cwd=root, env={**env, "FAKE_CODEX_HANG": "1"}, capture_output=True, text=True,
+                           encoding="utf-8", timeout=60)
+        check("isn't answering, so nothing was started" in r.stdout and time.monotonic() - t0 < 30,
+              f"an AI that doesn't answer is caught quickly: {r.stdout.strip()[:160]} {r.stderr[-300:]}")
         code, res = call("/api/settings", {"runner": "codex", "model": "gpt-test", "document_name": "Zoë Example",
                                            "permanent_only": False})
         check(code == 200 and res["ok"], "settings saved")

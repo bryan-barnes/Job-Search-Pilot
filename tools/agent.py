@@ -203,6 +203,23 @@ def check(cfg: dict) -> str | None:
     return None
 
 
+def _span(seconds: int) -> str:
+    return f"{seconds} seconds" if seconds < 120 else f"{round(seconds / 60)} minutes"
+
+
+class NoAnswer(RuntimeError):
+    """The AI didn't finish in time (often: a local model that isn't running)."""
+
+
+def ai_label(cfg: dict) -> str:
+    label = RUNNER_INFO.get(runner_name(cfg), (runner_name(cfg),))[0]
+    return label + (f" ({model_name(cfg)})" if model_name(cfg) else "")
+
+
+LOCAL_HINT = "If it uses a model on your own computer or server, check that the model is running."
+TEST_HINT = "Settings → Test this AI checks it."
+
+
 def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800) -> str:
     """Run the prompt through the configured agent; output goes to log.
 
@@ -252,6 +269,9 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
         with open(transcript or log, "wb") as f:
             r = subprocess.run(cmd, cwd=cwd, input=stdin,
                                stdout=f, stderr=subprocess.STDOUT, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise NoAnswer(f"{ai_label(cfg)} didn't finish within {_span(timeout)}. "
+                       + LOCAL_HINT + " " + TEST_HINT) from None
     finally:
         (cwd / "PROMPT.md").unlink(missing_ok=True)
         if transcript:
@@ -261,6 +281,17 @@ def run_prompt(cfg: dict, prompt: str, cwd: Path, log: Path, timeout: int = 1800
     if r.returncode != 0:
         raise RuntimeError(f"{runner} exited {r.returncode}; see {(transcript or log).name}")
     return runner
+
+
+def ensure_answering(cfg: dict, timeout: int = 180) -> None:
+    """Before a long job, make sure the AI answers at all, so an unreachable model fails in a few
+    minutes instead of at the long job's time limit. Does nothing in manual mode."""
+    if runner_name(cfg) == "manual":
+        return
+    r = test_runner(cfg, timeout=timeout)
+    if not r["ok"]:
+        msg = r["message"].replace(" See what it printed below.", "")
+        raise RuntimeError(f"{ai_label(cfg)} isn't answering, so nothing was started. {msg} {TEST_HINT}")
 
 
 TEST_PROMPT = ("This is a connection test from Job Search Pilot. Don't read, write, or run anything. "
@@ -283,8 +314,8 @@ def test_runner(cfg: dict, timeout: int = 240) -> dict:
         try:
             run_prompt(cfg, TEST_PROMPT, cwd=Path(tmp), log=log, timeout=timeout)
             err = None
-        except subprocess.TimeoutExpired:
-            err = f"No answer after {timeout // 60} minutes."
+        except NoAnswer:
+            err = f"No answer after {_span(timeout)}. {LOCAL_HINT}"
         except (RuntimeError, OSError) as exc:
             err = str(exc)
         answer = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""

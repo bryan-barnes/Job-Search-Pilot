@@ -3,9 +3,12 @@
 The writing in this setup (application packets, Score fit, optional alert pre-scoring, trim passes) is
 done by an AI agent through one of four runners. Pick one under **Settings** on the board (it
 saves `agent.runner` and `agent.model` in `config.json`), where **Test this AI** sends it a tiny
-question to check it's installed and signed in. All four are driven by the same prompt files.
-How good the packets are depends on the model behind the runner. `tools/agent.py` runs them; nothing in this repo talks to an LLM API
-directly.
+question to check it's installed and signed in. Packets and Score fit ask the same question
+first (up to 3 minutes), so a model that isn't reachable, such as a local one that's switched
+off, fails with a clear message instead of hanging until the time limit (30 minutes per packet,
+15 per Score fit batch). All four are driven by the same prompt files. How good the packets are
+depends on the model behind the runner. `tools/agent.py` runs them; nothing in this repo talks
+to an LLM API directly.
 
 ## The four runners
 

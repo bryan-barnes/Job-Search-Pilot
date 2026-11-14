@@ -322,6 +322,10 @@ def main() -> None:
                                    "; paste the AI's reply into the board (or write them) first.")
             finish_packet(p, job, cfg, job_id, stem)
             return
+        # Before touching anything, make sure the AI answers (an unreachable model would otherwise
+        # hang until the time limit, after the old files were already moved aside).
+        p.status("running", f"Checking that {agent.ai_label(cfg)} answers")
+        agent.ensure_answering(cfg)
         # Keep the last version of anything we're about to regenerate (you may have edited it).
         old = [f for f in p.dir.iterdir() if f.is_file() and f.name not in ("status.json", "prep.log")]
         if any(f.name == "cover-letter.md" for f in old):

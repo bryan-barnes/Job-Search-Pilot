@@ -187,13 +187,19 @@ def main() -> None:
             status("manual", f"Prompt ready for {len(ids)} job(s): copy it, paste it into your AI "
                              "assistant, then paste its reply back here.", total=len(ids))
             return
+        status("running", f"Checking that {agent.ai_label(cfg)} answers", done=0, total=len(jobs))
+        agent.ensure_answering(cfg)
         scored = 0
         for i in range(0, len(jobs), BATCH):
             batch = jobs[i:i + BATCH]
             status("running", f"Scoring {i + 1}-{i + len(batch)} of {len(jobs)}", done=scored, total=len(jobs))
             with tempfile.TemporaryDirectory(prefix="fit-") as tmp:
                 tmp = Path(tmp)
-                agent.run_prompt(cfg, prompt(cfg, batch), cwd=tmp, log=tmp / "score.log", timeout=900)
+                try:
+                    agent.run_prompt(cfg, prompt(cfg, batch), cwd=tmp, log=tmp / "score.log", timeout=900)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError((f"Scored {scored} of {len(jobs)}, then it stopped: " if scored else "")
+                                       + str(exc)) from None
                 out = (tmp / "score.log").read_text(encoding="utf-8", errors="replace")
             results = agent.extract_json_results(out) or []
             scored += len(apply_results(results, {j["id"] for j in batch}))
