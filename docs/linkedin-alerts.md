@@ -152,7 +152,14 @@ fixed patterns, never followed as instructions.
    LinkedIn's own UI lines (alumni counts, "actively hiring", "View all jobs") are dropped.
 4. **Deduplicate.** A job is dropped if its LinkedIn ID is already in `alerts-state.json`,
    already in `jobs.js`, or has the same normalized company + title already in `jobs.js`
-   (the same role is often posted once per city).
+   (the same role is often posted once per city). After reading the posting (step 5), it also
+   drops near-duplicates (`tools/dedupe.py`): a job at the same company whose posting text is
+   mostly the same as one on the board (one opening posted twice under slightly different
+   titles), and a job board's repost (Jobgether, Ladders, Lensa, ...) of a specific title that's
+   already on the board under the employer's name. A short, common title from a job board, or
+   an employer's posting that a job board already reposted, is added with a note instead.
+   Posting text is kept in `alerts-postings.json`. Skipped duplicates are logged in `ingest.log`
+   with the job they matched.
 5. **Read the posting.** For each new job, `tools/linkedin_check.py` fetches the public
    `linkedin.com/jobs/view/<id>` page and decides:
    - **closed** — the page says "No longer accepting applications". Closed jobs are skipped

@@ -28,6 +28,37 @@ PY = [sys.executable, "-X", "utf8"]
 ROLE = "Directeur · Numérique – Stratégie ✓"  # non-ASCII on purpose: Windows code pages
 
 
+DEDUPE_TEST = r"""
+import sys; from pathlib import Path; sys.path.insert(0, 'tools'); import dedupe
+body = ('You will lead the web and UX strategy for client accounts, own day-to-day stakeholder '
+        'relationships, manage senior and junior strategists, oversee optimization and data '
+        'strategies, and build measurement frameworks for every project you run. ') * 3
+other = ('Lead pricing analysis and campaign calendars across our degree programs, partner with '
+         'finance on tuition models, and report enrollment results to the marketing leadership team. ') * 3
+b = dedupe.Board([{'id': 'acme-strategy-director', 'company': 'Acme Studio', 'role': 'Strategy Director',
+                   'linkedin': '1'},
+                  {'id': 'viatris-dir-dx', 'company': 'Viatris', 'role': 'Director, Digital Experience Ecosystem',
+                   'linkedin': '2'},
+                  {'id': 'acme-dir-marketing', 'company': 'Acme Studio', 'role': 'Director of Marketing',
+                   'linkedin': '3'}],
+                 {'1': {'text': body}, '3': {'text': other}}, Path('.'))
+assert b.duplicate_of('Acme Studio', 'Strategy Director, Web', body.replace('client', 'customer'))[0] \
+    == 'acme-strategy-director', 'same company, same text'
+assert b.duplicate_of('Acme Studio', 'Director, Pricing and Campaigns', other.replace('pricing', 'brand')
+                      .replace('tuition', 'loyalty').replace('enrollment', 'revenue')
+                      .replace('degree', 'retail')) is None, 'different role at the same company'
+assert b.duplicate_of('Other Co', 'Strategy Director', body) is None, 'same text, other company'
+assert b.duplicate_of('Jobgether', 'Director, Digital Experience Ecosystem', '')[0] == 'viatris-dir-dx', \
+    'job-board repost of a specific title'
+assert b.duplicate_of('Jobgether', 'Director of Marketing', '') is None, 'common title is not skipped'
+assert 'acme-dir-marketing' in b.possible_repost('Jobgether', 'Director of Marketing'), 'but gets a note'
+b.add('jobgether-vp-web', 'Jobgether', 'VP of Web', '')
+assert 'jobgether-vp-web' in b.possible_repost('Initech', 'VP of Web'), "employer's posting notes the repost"
+assert b.possible_repost('Initech', 'VP of Brand') == ''
+print('ok')
+"""
+
+
 def step(msg: str) -> None:
     print(f"\n== {msg}", flush=True)
 
@@ -65,7 +96,7 @@ def main() -> None:
     root = tmp / "pilot"
     personal = {"applications", "config.json", "jobs.js", "about-me.md", "inbox.md", "strengths",
                 "applicant-profile.md", "canned-answers.md", "experience-bank.md", "alerts-state.json",
-                "alerts-scores.json", "ingest.log", "board.log", ".git", ".jobs.lock"}
+                "alerts-scores.json", "alerts-postings.json", "ingest.log", "board.log", ".git", ".jobs.lock"}
 
     def skip(folder: str, names: list[str]) -> set:
         here = Path(folder).resolve()
@@ -257,8 +288,14 @@ def main() -> None:
               "remote-only can be turned off (hybrid and in-person jobs listed)")
         call("/api/settings", {"runner": "manual", "model": "", "permanent_only": True, "remote_only": True})
 
+        step("Duplicate check")
+        r = subprocess.run(PY + ["-I", "-c", DEDUPE_TEST], cwd=root, capture_output=True, text=True,
+                           encoding="utf-8", timeout=60)
+        ok = r.returncode == 0 and r.stdout.strip() == "ok"
+        check(ok, "near-duplicates caught" + ("" if ok else f": {r.stdout} {r.stderr[-600:]}"))
+
         step("Security")
-        req = urllib.request.Request(BASE + "/api/update", method="POST",
+        req =urllib.request.Request(BASE + "/api/update", method="POST",
                                      data=json.dumps({"id": jid, "status": "passed"}).encode(),
                                      headers={"Content-Type": "application/json", "Origin": "https://evil.example"})
         try:

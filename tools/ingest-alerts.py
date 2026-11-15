@@ -8,9 +8,11 @@ Usage:
 Flow: fetch new emails from the Worker (config.json -> worker_url) -> skip "your alert has been
 created" notices -> parse each job (title, company, location, job ID) -> drop jobs already in
 jobs.js or seen before -> read each job's public LinkedIn page: skip postings that are already
-closed, skip contract/temp/part-time jobs when config.json has permanent_only, and record whether
-the job is fully remote -> optionally ask the configured agent for a skills-fit pre-score (config
-scoring.enabled, off by default) -> add the jobs to jobs.js with status "new". Nothing is declined
+closed, skip contract/temp/part-time jobs when config.json has permanent_only, skip near-duplicates
+of jobs on the board (tools/dedupe.py: same company and mostly the same posting text, or a job
+board reposting a title that's already there), and record whether the job is fully remote ->
+optionally ask the configured agent for a skills-fit pre-score (config scoring.enabled, off by
+default) -> add the jobs to jobs.js with status "new". Nothing is declined
 on fit or sector; you triage the New stage yourself. The board lists only jobs with remote "yes";
 the rest are kept but hidden.
 
@@ -38,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent  # noqa: E402
+import dedupe  # noqa: E402
 import jobsfile  # noqa: E402
 import linkedin_check  # noqa: E402
 
@@ -45,6 +48,7 @@ HOME = Path(__file__).resolve().parent.parent
 JOBS = HOME / "jobs.js"
 STATE = HOME / "alerts-state.json"
 CACHE = HOME / "alerts-scores.json"
+POSTINGS = HOME / "alerts-postings.json"  # posting text by LinkedIn job ID, for dedupe.py
 
 
 def log(msg: str) -> None:
@@ -102,6 +106,17 @@ def parse_jobs(text: str) -> list[dict]:
 
 def norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def board_jobs() -> list[dict]:
+    """Every job in jobs.js, for dedupe.Board: id, company, role, and LinkedIn job ID."""
+    text = JOBS.read_text(encoding="utf-8")
+    out = []
+    for jid in jobsfile.ids(text):
+        m = re.search(r"jobs/view/(\d+)", str(jobsfile.get(text, jid, "url") or ""))
+        out.append({"id": jid, "company": str(jobsfile.get(text, jid, "company") or ""),
+                    "role": str(jobsfile.get(text, jid, "role") or ""), "linkedin": m and m.group(1)})
+    return out
 
 
 def existing_tracker() -> tuple[set[str], set[str]]:
@@ -164,6 +179,7 @@ def add_to_tracker(jobs: list[dict], today: str, scored_off: str) -> None:
                   "no": f' Not fully remote per the posting: "{j.get("evidence", "")}".',
                   }.get(remote, " The posting doesn't say whether it's remote; check before applying.")
         notes += " Pay and requirements are not in the alert email."
+        notes += j.get("dup_note", "")
         try:
             text = jobsfile.add_job(text, {
                 "id": jid, "company": j["company"], "role": j["title"],
@@ -267,10 +283,14 @@ def main() -> None:
     fresh = [j for j in fresh if not (norm(j["company"]) + "|" + norm(j["title"]) in seen_pairs
                                        or seen_pairs.add(norm(j["company"]) + "|" + norm(j["title"])))]
 
-    # Read each posting: drop ones that already closed, and record remote / not remote.
-    open_jobs, expired, temp = [], [], []
+    # Read each posting: drop ones that already closed or are near-duplicates, and record
+    # remote / not remote. Employers' own postings go first, so they win over job-board reposts.
+    fresh.sort(key=lambda j: dedupe.is_aggregator(j["company"]))
+    texts = dedupe.load(POSTINGS)
+    board = dedupe.Board(board_jobs(), texts, HOME)
+    open_jobs, expired, temp, dupes = [], [], [], []
     for j in fresh:
-        info = linkedin_check.check(j["jobId"])
+        info = linkedin_check.posting(j["jobId"])
         time.sleep(1)
         if info and info["closed"]:
             expired.append(j)
@@ -281,6 +301,17 @@ def main() -> None:
             log(f'  SKIP contract/temp/part-time  {j["title"]} | {j["company"]}  '
                 f'({info["not_permanent"][:120]})')
             continue
+        desc = info["description"] if info else ""
+        dup = board.duplicate_of(j["company"], j["title"], desc)
+        if dup:
+            j["dup"] = dup
+            dupes.append(j)
+            log(f'  SKIP duplicate  {j["title"]} | {j["company"]}  (of {dup[0]}: {dup[1]})')
+            continue
+        j["dup_note"] = board.possible_repost(j["company"], j["title"])
+        board.add(jobsfile.slug(f'{j["company"]} {j["title"]}'), j["company"], j["title"], desc)
+        if desc:
+            texts[j["jobId"]] = {"company": j["company"], "title": j["title"], "text": desc[:20000]}
         j["remote"] = info["remote"] if info else "unknown"
         j["evidence"] = info["evidence"] if info else ""
         if j["remote"] == "unknown" and re.search(r"\bremote\b", j["location"], re.I) \
@@ -329,13 +360,16 @@ def main() -> None:
         state["jobs"][j["jobId"]] = f"{today} skipped: posting closed"
     for j in temp:
         state["jobs"][j["jobId"]] = f"{today} skipped: contract, temporary, or part-time"
+    for j in dupes:
+        state["jobs"][j["jobId"]] = f'{today} skipped: duplicate of {j["dup"][0]} ({j["dup"][1]})'
+    POSTINGS.write_text(json.dumps(texts, indent=1), encoding="utf-8")
     state["messages"] = sorted(done | {m["key"] for m in new_msgs})
     STATE.write_text(json.dumps(state, indent=1), encoding="utf-8")
     remote_n = sum(j["remote"] == "yes" for j in fresh)
     shown = (f"shown on the board; {len(fresh) - remote_n} hidden" if agent.remote_only(cfg)
              else "all shown on the board")
-    log(f"Added {len(fresh)} job(s) to jobs.js as New ({remote_n} fully remote and {shown}). Skipped {len(expired)} closed posting(s) and "
-        f"{len(temp)} contract, temporary, or part-time job(s).")
+    log(f"Added {len(fresh)} job(s) to jobs.js as New ({remote_n} fully remote and {shown}). Skipped {len(expired)} closed posting(s), "
+        f"{len(temp)} contract, temporary, or part-time job(s), and {len(dupes)} duplicate(s).")
     recheck_open_jobs(today, dry=False)
 
 

@@ -15,6 +15,7 @@ strengths/
 # Local state and logs
 alerts-state.json
 alerts-scores.json
+alerts-postings.json
 ingest.log
 board.log
 .jobs.lock

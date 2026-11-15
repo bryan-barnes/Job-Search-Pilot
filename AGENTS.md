@@ -136,7 +136,9 @@ LinkedIn is the manual, human-paced part: the owner reading the badge and clicki
 
 `tools/ingest-alerts.py` pulls new alert emails from the Worker and reads each job's public
 LinkedIn page (`tools/linkedin_check.py`). It skips postings that already closed, skips
-contract/temp/part-time jobs when `permanent_only` is on, sets `remote` from the posting text,
+contract/temp/part-time jobs when `permanent_only` is on, skips near-duplicates of jobs already
+on the board (`tools/dedupe.py`: same company and mostly the same posting text, or a job board
+like Jobgether reposting a title that's already there), sets `remote` from the posting text,
 and adds the rest to `jobs.js` with status `new`. Each run (even without alerts set up) also
 marks jobs they haven't applied to (new, found, applying) as `expired` once the posting says it's
 closed. If `scoring.enabled` is on, the configured agent gives each new job a skills-fit

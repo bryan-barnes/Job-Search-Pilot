@@ -199,7 +199,7 @@ tests it:
 | `tools/documents.py`, `build-resume.js`, `build-letter.js` | Markdown → Word and PDF |
 | `tools/jobsfile.py` | Safe, atomic edits to `jobs.js` |
 | `tools/fitscore.py` | Score fit: Fit 1–5 for many jobs at once, from their postings |
-| `tools/ingest-alerts.py`, `linkedin_check.py` | The LinkedIn alert feed and the posting checks |
+| `tools/ingest-alerts.py`, `linkedin_check.py`, `dedupe.py` | The LinkedIn alert feed, the posting checks, and duplicate detection |
 | `tools/alerts_worker.py` | Check your alerts Worker; shows Gmail's forwarding confirmation code |
 | `tools/job-alerts-worker/worker.js` | The Cloudflare Email Worker that stores the alert emails |
 | `templates/` | The starting copies of your files |
