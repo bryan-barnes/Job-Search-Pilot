@@ -559,7 +559,10 @@ async function post(path, body) {
   return data;
 }
 let toastTimer;
-function toast(msg, undo = true) {
+let undoable = null; // what the toast's Undo reverses: { msg, id }
+// undo: false for a message, or { id } (the job changed; null for a new job) to offer Undo.
+function toast(msg, undo = false) {
+  undoable = undo ? { msg, id: undo.id } : null;
   $("toastMsg").textContent = msg; $("toastUndo").hidden = !undo; $("toast").hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 8000);
 }
@@ -568,20 +571,29 @@ function applyResult(j, change, res) {
   for (const k of ["notes", "applied", "remoteChecked"]) if (res[k] != null) j[k] = res[k];
 }
 async function quickSet(j, change, label) {
-  try { applyResult(j, change, await post("/api/update", { id: j.id, ...change })); render(); toast(`${label}: ${j.role}`); }
-  catch (e) { toast(e.message, false); }
+  try { applyResult(j, change, await post("/api/update", { id: j.id, ...change })); render(); toast(`${label}: ${j.role}`, { id: j.id }); }
+  catch (e) { toast(e.message); }
 }
 async function act(j, label, change) {
   $("dStatus").textContent = "Saving…";
   try {
     applyResult(j, change, await post("/api/update", { id: j.id, ...change, note: $("dReason").value }));
     $("dlg").close(); render();
-    toast(`${label}: ${j.role}`);
+    toast(`${label}: ${j.role}`, { id: j.id });
   } catch (e) { $("dStatus").textContent = e.message; }
 }
+// Undo reverses only the change in the toast. Reload just the data, not the page, so the view
+// you're in (a Check remote round, a filter, shown hidden jobs) stays as it was.
 $("toastUndo").onclick = async () => {
-  try { await post("/api/undo"); location.reload(); }
-  catch (e) { $("toastMsg").textContent = e.message; }
+  const u = undoable;
+  if (!u) return;
+  $("toastUndo").hidden = true;
+  try {
+    await post("/api/undo");
+    if (u.id) checkedNow.delete(u.id); // an undone remote check goes back on the to-check list
+    lastJobsText = ""; await refreshJobs();
+    toast(`Undid ${u.msg}`);
+  } catch (e) { toast(e.message); }
 };
 $("hiddenBtn").onclick = () => { showHidden = !showHidden; render(); };
 function startPrepMode() { prepPicked.clear(); jobs.filter(prepReady).forEach((j) => prepPicked.add(j.id)); checkedNow.clear(); filter = "prep"; render(); window.scrollTo({ top: 0 }); }
@@ -999,7 +1011,7 @@ $("addForm").onsubmit = async (ev) => {
       evidence: lookedUp && lookedUp.remote === remote ? lookedUp.evidence : "" });
     $("addDlg").close();
     lastJobsText = ""; await refreshJobs();
-    toast(`Added: ${$("aRole").value}` + (remote === "yes" || !remoteOnly() ? "" : " (hidden until you confirm it's fully remote)"));
+    toast(`Added: ${$("aRole").value}` + (remote === "yes" || !remoteOnly() ? "" : " (hidden until you confirm it's fully remote)"), { id: null });
   } catch (e) { $("aStatus").textContent = e.message; }
   $("aSave").disabled = false;
 };
